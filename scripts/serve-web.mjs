@@ -56,6 +56,6 @@ export function staticSite(directory) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3000);
   staticSite(fileURLToPath(new URL('../dist/', import.meta.url))).listen(port, '0.0.0.0', () => {
-    console.log(`Frenemy Web listening on port ${port}`);
+    console.log(`Chorus Web listening on port ${port}`);
   });
 }

@@ -96,7 +96,7 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
     assert.equal(options.method, 'POST');
     assert.equal(options.credentials, 'omit');
     assert.equal(new Headers(options.headers).has('Authorization'), false);
-    assert.equal(options.headers['X-Title'], 'Frenemy Web');
+    assert.equal(options.headers['X-Title'], 'Chorus Web');
     assert.deepEqual(JSON.parse(options.body).messages, messages);
     return stream([
       ': horde queue_position=7 wait_time=42\r\n\r\n',

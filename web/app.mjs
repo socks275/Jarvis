@@ -185,7 +185,7 @@ function paintComposer() {
   $('deep-button').disabled = Boolean(active);
   $('deep-button').setAttribute('aria-pressed', String(deeper));
   $('composer-status').hidden = !(busyElsewhere || cooldown || needsFile);
-  $('composer-note').textContent = busyElsewhere ? 'Frenemy is replying in another chat.'
+  $('composer-note').textContent = busyElsewhere ? 'Chorus is replying in another chat.'
     : cooldown ? 'The community network asked us to wait. You can send again when the cooldown ends.'
       : needsFile ? 'Select a GGUF file to chat on-device.' : '';
   $('open-busy').hidden = !busyElsewhere;
@@ -469,7 +469,7 @@ function renderMarkdown(body, text, withControls) {
 function messageNode(message, last) {
   const user = message.role === 'user';
   const row = el('article', `message message-${user ? 'user' : 'assistant'}`);
-  row.setAttribute('aria-label', user ? 'Your message' : 'Frenemy’s reply');
+  row.setAttribute('aria-label', user ? 'Your message' : 'Chorus’s reply');
   row.dataset.status = message.status ?? 'sent';
   if (user) { row.append(el('p', 'user-bubble', message.text)); return row; }
   const avatar = el('span', 'assistant-icon');
@@ -477,7 +477,7 @@ function messageNode(message, last) {
   const content = el('div', 'assistant-content');
   const body = el('div', 'answer-body');
   row.append(avatar, content);
-  content.append(el('p', 'assistant-name', 'Frenemy'), body);
+  content.append(el('p', 'assistant-name', 'Chorus'), body);
   body.hidden = !message.text;
   if (message.text) renderMarkdown(body, message.text, message.status !== 'pending');
   if (message.video) content.append(videoCard(message.video));
@@ -570,7 +570,7 @@ function paintView(follow = false) {
   $('chat-title').title = current?.title ?? '';
   $('chat-options').hidden = !writingInChat;
   $('chat-options').disabled = Boolean(active && active.chat === current);
-  prompt.placeholder = writingInChat ? 'Ask a follow-up…' : 'Ask Frenemy anything…';
+  prompt.placeholder = writingInChat ? 'Ask a follow-up…' : 'Ask Chorus anything…';
   paintThread(follow);
   sizePrompt();
   paintComposer();
@@ -702,7 +702,7 @@ async function generate(chat, message) {
   paintHistory();
   paintSettings();
   if (!mobile.matches) prompt.focus({ preventScroll: true });
-  $('announcer').textContent = 'Frenemy is preparing a reply.';
+  $('announcer').textContent = 'Chorus is preparing a reply.';
   try {
     // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
@@ -821,7 +821,7 @@ $('canvas-download').addEventListener('click', () => {
   const blob = new Blob([$('canvas-source').value], { type: 'text/plain;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `frenemy-canvas.${extension}`;
+  link.download = `chorus-canvas.${extension}`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -851,7 +851,7 @@ $('reset-permission').addEventListener('click', () => {
   communityAllowed = false;
   paintSettings();
   $('check-network').focus();
-  toast('Frenemy will ask next time you send a community message.');
+  toast('Chorus will ask next time you send a community message.');
 });
 $('scroll-latest').addEventListener('click', () => { scrollToEnd(); prompt.focus({ preventScroll: true }); });
 scroll.addEventListener('scroll', syncScroll, { passive: true });

@@ -1,6 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0c5ff"/><stop offset="1" stop-color="#a996fe"/></linearGradient></defs>
-  <rect x="3" y="3" width="58" height="58" rx="17" fill="#211a33" stroke="#69529b" stroke-width="1.5"/>
-  <path fill="url(#g)" d="M28 13c1.4 11 5 14.5 16 16-11 1.5-14.6 5-16 16-1.4-11-5-14.5-16-16 11-1.5 14.6-5 16-16Zm16 1c.6 3.4 2.1 5 5.5 5.5-3.4.5-4.9 2.1-5.5 5.5-.6-3.4-2.1-5-5.5-5.5 3.4-.5 4.9-2.1 5.5-5.5Z"/>
-  <circle cx="45" cy="43" r="1.8" fill="#d6b6fa"/>
+  <defs>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#efd8ff"/><stop offset=".52" stop-color="#b18cff"/><stop offset="1" stop-color="#7ce0ff"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#251b3a"/><stop offset="1" stop-color="#100d1a"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="18" fill="url(#tile)" stroke="#513a79" stroke-width="1.5"/>
+  <path fill="url(#spark)" d="M28 13c1.4 11 5 14.5 16 16-11 1.5-14.6 5-16 16-1.4-11-5-14.5-16-16 11-1.5 14.6-5 16-16Zm16 1c.6 3.4 2.1 5 5.5 5.5-3.4.5-4.9 2.1-5.5 5.5-.6-3.4-2.1-5-5.5-5.5 3.4-.5 4.9-2.1 5.5-5.5Z"/>
+  <circle cx="45" cy="43" r="1.8" fill="#8fe6ff"/>
 </svg>

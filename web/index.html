@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Frenemy is a free AI chat. Ask questions, write, and explore ideas without a sign-up, API key, or model download.">
-  <meta name="theme-color" content="#111017">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://oai.aihorde.net; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Frenemy — AI Chat</title>
+  <meta name="description" content="Chorus is a free AI chat where several models answer together. Ask questions, write, plan and build — no sign-up, API key or download.">
+  <meta name="theme-color" content="#08070d">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com; connect-src 'self' https://oai.aihorde.net https://inv.nadeko.net https://pipedapi.adminforge.de https://yewtu.be; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
@@ -52,7 +52,7 @@
     <aside class="sidebar" id="sidebar" aria-label="Chat sidebar">
       <div class="sidebar-inner">
         <div class="sidebar-head">
-          <button type="button" id="brand" class="brand" aria-label="Frenemy home"><span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span><span>frenemy<span class="brand-period">.</span></span></button>
+          <button type="button" id="brand" class="brand" aria-label="Chorus home"><span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span><span>chorus<span class="brand-period">.</span></span></button>
           <button type="button" id="close-sidebar" class="icon-button sidebar-close" aria-label="Hide sidebar" title="Hide sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
         </div>
         <div class="sidebar-actions">
@@ -99,16 +99,16 @@
               <img src="./glass-spark.webp" srcset="./glass-spark-small.webp 480w, ./glass-spark.webp 920w" sizes="(max-width: 540px) 200px, (max-width: 1050px) 373px, 424px" alt="" width="920" height="920" fetchpriority="high">
             </div>
             <div class="hero-copy">
-              <p class="welcome-kicker"><span></span> Frenemy AI</p>
+              <p class="welcome-kicker"><span></span> Chorus · many models, one answer</p>
               <h1 id="welcome-title">What’s on <em>your mind?</em></h1>
-              <p class="welcome-description">Ask a question, explore an idea, or get unstuck.</p>
+              <p class="welcome-description">Ask anything. Chorus picks the right models, lets them check each other, and gives you one answer.</p>
             </div>
           </div>
           <div id="welcome-composer" class="welcome-composer">
             <section class="composer-group" id="composer" aria-label="Message composer">
               <div class="composer-box">
-                <label for="prompt" class="sr-only">Message Frenemy</label>
-                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Frenemy anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
+                <label for="prompt" class="sr-only">Message Chorus</label>
+                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
                 <div class="composer-controls">
                   <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
                   <span class="composer-spacer"></span>
@@ -170,7 +170,7 @@
   </dialog>
 
   <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
-    <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Frenemy answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Chorus answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <fieldset class="engine-options" id="engine-options">
       <legend>AI connection</legend>
       <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
@@ -178,7 +178,7 @@
     </fieldset>
     <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
-      <p>Frenemy uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
+      <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
       <p>One model reads each message first and decides how many models should answer: one for small talk, two for a question, three for code or tricky work. The reply names the model that decided and the models that answered.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
@@ -193,7 +193,7 @@
     </div>
     <div class="settings-box" id="youtube-settings">
       <h3>YouTube</h3>
-      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Frenemy opens a YouTube search instead.</p>
+      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Chorus opens a YouTube search instead.</p>
     </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
@@ -227,6 +227,6 @@
 
   <div id="toast" class="toast" role="status" hidden></div>
   <p id="announcer" class="sr-only" role="status"></p>
-  <noscript><div class="no-script">Enable JavaScript to use Frenemy chat.</div></noscript>
+  <noscript><div class="no-script">Enable JavaScript to use Chorus chat.</div></noscript>
 </body>
 </html>

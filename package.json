@@ -1,9 +1,9 @@
 {
-  "name": "frenemy-web",
+  "name": "chorus-web",
   "version": "1.0.0",
   "private": true,
   "license": "MIT",
-  "description": "A free chat interface for online and on-device AI models",
+  "description": "Chorus: a free chat app where several AI models answer together",
   "engines": {
     "node": ">=20.19"
   },

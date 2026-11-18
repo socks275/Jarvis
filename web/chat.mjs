@@ -1,5 +1,6 @@
 export const PROMPT_LIMIT = 4000;
 export const OUTPUT_LIMIT = 12000;
+// Storage keys keep their original prefix so saved chats survive the rename.
 export const HISTORY_KEY = 'frenemy-web:chats:v1';
 const LEGACY_KEY = 'frenemy-web:runs:v1';
 const MAX_CHATS = 32;
@@ -10,7 +11,7 @@ const textEncoder = new TextEncoder();
 const id = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${(++id.sequence)}`;
 id.sequence = 0;
 
-const INSTRUCTIONS = 'You are Frenemy, a helpful AI assistant. Answer the user directly and use the recent conversation when relevant. Be accurate, practical, and clear. Use Markdown when it improves readability. If you are unsure, say so. Do not claim to have browsed the web or used tools.';
+const INSTRUCTIONS = 'You are Chorus, a helpful AI assistant. Answer the user directly and use the recent conversation when relevant. Be accurate, practical, and clear. Use Markdown when it improves readability. If you are unsure, say so. Do not claim to have browsed the web or used tools.';
 
 // Words that usually mean the answer needs real work rather than a sentence.
 const CODE_HINT = /\b(?:code|coding|function|functions|method|class|interface|refactor|debug|bug|stack trace|traceback|exception|regex|sql|database|schema|api|endpoint|typescript|javascript|python|rust|golang|php|kotlin|css|html|json|yaml|docker|kubernetes|git|bash|shell|npm|node|react|vue|svelte|compiler|deploy|migration|algorithm|unit test)\b/i;

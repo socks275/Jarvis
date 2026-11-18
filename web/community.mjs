@@ -139,7 +139,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
   try {
     const response = await fetchImpl(API + path, {
       method: body ? 'POST' : 'GET',
-      ...(body ? { headers: { 'Content-Type': 'application/json', 'X-Title': 'Frenemy Web' }, body: JSON.stringify(body) } : {}),
+      ...(body ? { headers: { 'Content-Type': 'application/json', 'X-Title': 'Chorus Web' }, body: JSON.stringify(body) } : {}),
       cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: connection.signal,
     });
     if (response.ok && body && response.headers.get('Content-Type')?.includes('text/event-stream')) {

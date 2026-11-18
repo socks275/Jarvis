@@ -30,4 +30,4 @@ await Promise.all([
   copyFile(at('LICENSE'), at('dist/licenses/frenemy.txt')),
   ...assets.map(([from, to]) => copyFile(at(packages + from), at(`dist/${to}`))),
 ]);
-console.log('Built the static Frenemy website in dist/.');
+console.log('Built the static Chorus website in dist/.');
