@@ -18,13 +18,12 @@ export const PLANS = {
   ],
 };
 
-export function createRun({ id, prompt, mode, engine, names, createdAt = Date.now() }) {
+export function createRun({ id, prompt, mode, names, createdAt = Date.now() }) {
   const clean = prompt.trim();
   if (!clean || clean.length > PROMPT_LIMIT) throw new Error(`Enter a prompt up to ${PROMPT_LIMIT.toLocaleString('en-US')} characters.`);
   if (!Object.hasOwn(PLANS, mode)) throw new Error('Choose a relay type.');
-  if (engine !== 'demo' && engine !== 'local') throw new Error('Choose a runtime.');
   return {
-    id, prompt: clean, mode, engine, names, createdAt, state: 'running', error: '',
+    id, prompt: clean, mode, engine: 'local', names, createdAt, state: 'running', error: '',
     steps: PLANS[mode].map((stage) => ({ key: stage.key, state: 'waiting', text: '' })),
   };
 }
@@ -78,7 +77,7 @@ export function resultStep(run, selected) {
 function validHistoryRun(run) {
   return run && typeof run.id === 'string' && run.id.length <= 100 && typeof run.prompt === 'string'
     && run.prompt.length <= PROMPT_LIMIT && Number.isFinite(run.createdAt) && Math.abs(run.createdAt) <= 8.64e15
-    && (run.engine === 'demo' || run.engine === 'local') && RUN_STATES.has(run.state)
+    && run.engine === 'local' && RUN_STATES.has(run.state)
     && Object.hasOwn(PLANS, run.mode) && typeof run.error === 'string' && run.error.length <= 500
     && ['driver', 'reviewer'].every((role) => typeof run.names?.[role] === 'string' && run.names[role].length <= 300)
     && Array.isArray(run.steps) && run.steps.length === PLANS[run.mode].length
@@ -89,7 +88,11 @@ function validHistoryRun(run) {
 export function readHistory(storage) {
   try {
     const items = JSON.parse(storage?.getItem(HISTORY_KEY) || '[]');
-    return Array.isArray(items) ? items.filter(validHistoryRun).slice(0, HISTORY_LIMIT) : [];
+    if (!Array.isArray(items)) return [];
+    const runs = items.filter(validHistoryRun).slice(0, HISTORY_LIMIT);
+    // Remove old scripted entries without touching valid local model runs.
+    if (items.some((item) => item?.engine === 'demo')) saveHistory(storage, runs);
+    return runs;
   } catch { return []; }
 }
 

@@ -1,4 +1,3 @@
-import { EXAMPLES, demoGenerator } from './demo.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import {
   HISTORY_KEY, MODE_LABELS, PLANS, PROMPT_LIMIT, STATE_LABELS,
@@ -8,22 +7,25 @@ import {
 const $ = (id) => document.getElementById(id);
 const form = $('relay-form');
 const prompt = $('prompt');
-const modelsDialog = $('models-dialog');
-const modelButtons = document.querySelectorAll('[data-models]');
+const modelForm = $('models-form');
+const modelRoles = ['driver', 'reviewer'];
+const views = {
+  workspace: { name: 'Relay desk', focus: 'main' },
+  history: { name: 'Run history', focus: 'history-title' },
+  settings: { name: 'Settings', focus: 'settings-title' },
+};
 const modes = [...form.querySelectorAll('input[name="mode"]')];
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const mode = () => modes.find((radio) => radio.checked).value;
-const engineName = (kind) => kind === 'local' ? 'Local AI' : 'Scripted demo';
-const engine = () => files.driver ? 'local' : 'demo';
-const modelName = (file) => file.name.replace(/\.gguf$/i, '').slice(0, 300);
-const inHistory = () => location.hash === '#history';
+const modelName = (file) => (file.name.replace(/\.gguf$/i, '') || file.name).slice(0, 300);
 
 let storage;
 try { storage = window.localStorage; } catch { /* opaque or blocked browser context */ }
 let history = readHistory(storage);
 let files = { driver: null, reviewer: null };
-let pendingFiles;
-let setupEpoch = 0;
+let pendingFiles = { ...files };
+let verifyingFiles = false;
+let currentView = 'workspace';
 let visibleRun;
 let selection;
 let controller;
@@ -55,49 +57,46 @@ function setPromptError(message = '') {
   else prompt.removeAttribute('aria-invalid');
 }
 
-function modelError(message = '') {
+function modelError(message = '', role) {
   $('model-error').textContent = message;
   $('model-error').hidden = !message;
+  for (const name of modelRoles) {
+    const input = $(`${name}-file`);
+    if (name === role && message) input.setAttribute('aria-invalid', 'true');
+    else input.removeAttribute('aria-invalid');
+  }
 }
-
-const exampleButtons = EXAMPLES.map((example) => {
-  const button = element('button', 'example', example.label);
-  button.type = 'button';
-  button.addEventListener('click', () => {
-    prompt.value = example.prompt;
-    paintPrompt();
-    prompt.focus();
-  });
-  $('examples').append(button);
-  return button;
-});
 
 function paintPrompt() {
   setPromptError();
   $('prompt-count').textContent = `${prompt.value.length.toLocaleString('en-US')} / ${PROMPT_LIMIT.toLocaleString('en-US')}`;
-  exampleButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(EXAMPLES[i].prompt === prompt.value.trim())));
 }
 
 function setBusy(active) {
   prompt.readOnly = active;
-  for (const control of [...modes, ...exampleButtons, ...modelButtons]) control.disabled = active;
-  $('run-button').disabled = active;
+  for (const radio of modes) radio.disabled = active;
+  $('run-button').disabled = active || !files.driver;
   $('run-button').querySelector('use').setAttribute('href', active ? '#i-wave' : '#i-play');
-  $('run-label').textContent = active ? 'Running…' : engine() === 'local' ? 'Run relay' : 'Run demo';
+  $('run-label').textContent = active ? 'Running…' : 'Run relay';
   $('stop-button').hidden = !active;
+  paintSettings();
 }
 
 function paintModels() {
-  const local = engine() === 'local';
-  const driver = local ? modelName(files.driver) : 'Demo driver';
-  const reviewer = local ? (files.reviewer ? modelName(files.reviewer) : 'Same as driver') : 'Demo reviewer';
+  const ready = Boolean(files.driver);
+  const driver = ready ? modelName(files.driver) : 'Not set';
+  const reviewer = files.reviewer ? modelName(files.reviewer) : ready ? 'Same as driver' : 'Not set';
   $('driver-name').textContent = $('driver-name').title = driver;
   $('reviewer-name').textContent = $('reviewer-name').title = reviewer;
-  $('note-title').textContent = local ? 'Running on your device' : 'You’re in demo mode';
-  $('note-body').textContent = local
+  $('setup-button').hidden = ready;
+  $('configure-models').hidden = !ready;
+  $('run-button').hidden = !ready;
+  $('run-hotkey').hidden = !ready;
+  $('note-title').textContent = ready ? 'Models run on your device' : 'No models loaded';
+  $('note-body').textContent = ready
     ? 'Relays use your CPU. Keep this tab open while a model is working.'
-    : 'Try a scripted relay with no setup, or load a free model for real AI responses.';
-  $('note-action').firstChild.textContent = local ? 'Manage models ' : 'Use local AI ';
+    : 'Choose a GGUF model in Settings to run a relay. One file can play both roles.';
+  $('note-action').hidden = ready;
   setBusy(Boolean(controller));
 }
 
@@ -108,8 +107,7 @@ function activeTimeline() {
     let detail = stage.detail;
     if (state === 'running') {
       const name = visibleRun.names[stage.role];
-      detail = visibleRun.engine === 'demo' ? 'Playing the scripted response…'
-        : livePhase?.key === stage.key && livePhase.phase === 'generating' ? `${name} is writing…` : `Loading ${name}…`;
+      detail = livePhase?.key === stage.key && livePhase.phase === 'generating' ? `${name} is writing…` : `Loading ${name}…`;
     } else if (state === 'done') detail = visibleRun.names[stage.role];
     else if (state === 'failed' || state === 'stopped') detail = STATE_LABELS[state];
     else if (visibleRun?.state === 'failed' || visibleRun?.state === 'stopped') detail = 'Not run';
@@ -146,7 +144,7 @@ function paintResult() {
   $('result').hidden = !run;
   if (!run) return;
   const shown = resultStep(run, selection);
-  $('result-description').textContent = `${MODE_LABELS[run.mode]} · ${engineName(run.engine)} · ${STATE_LABELS[run.state]}`;
+  $('result-description').textContent = `${MODE_LABELS[run.mode]} · ${STATE_LABELS[run.state]}`;
   const selectedStep = run.steps.find((step) => step.key === shown);
   const tabs = $('result-tabs');
   const focusedKey = tabs.contains(document.activeElement) && document.activeElement.dataset.key;
@@ -191,7 +189,7 @@ function paintHistory() {
     badge.dataset.state = run.state;
     const message = element('p', 'history-prompt', run.prompt);
     message.title = run.prompt;
-    const meta = element('p', 'history-meta', `${MODE_LABELS[run.mode]} · ${engineName(run.engine)} · ${dateFormat.format(run.createdAt)}`);
+    const meta = element('p', 'history-meta', `${MODE_LABELS[run.mode]} · ${dateFormat.format(run.createdAt)}`);
     content.append(badge, message, meta);
     const open = element('button', 'button border-button history-open', 'Open run');
     open.type = 'button';
@@ -212,115 +210,116 @@ function paintHistory() {
 }
 
 function route(moveFocus = false) {
-  const current = inHistory() ? 'history' : 'workspace';
-  $('view-workspace').hidden = current !== 'workspace';
-  $('view-history').hidden = current !== 'history';
-  $('breadcrumb').textContent = current === 'workspace' ? 'Relay desk' : 'Run history';
+  const requested = location.hash.slice(1);
+  currentView = Object.hasOwn(views, requested) ? requested : 'workspace';
+  for (const name of Object.keys(views)) $(`view-${name}`).hidden = currentView !== name;
+  $('breadcrumb').textContent = views[currentView].name;
   for (const link of document.querySelectorAll('[data-view]')) {
-    if (link.dataset.view === current) link.setAttribute('aria-current', 'page');
+    if (link.dataset.view === currentView) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
-  if (current === 'history') paintHistory();
-  if (current === 'workspace' && jumpToResult) {
+  if (currentView === 'history') paintHistory();
+  if (currentView === 'workspace' && jumpToResult) {
     jumpToResult = false;
     $('result-title').focus({ preventScroll: true });
     $('result').scrollIntoView({ block: 'nearest' });
   } else if (moveFocus) {
     window.scrollTo(0, 0);
-    $(current === 'history' ? 'history-title' : 'main').focus({ preventScroll: true });
+    $(views[currentView].focus).focus({ preventScroll: true });
   }
 }
 
-function paintFileChoices() {
-  for (const role of ['driver', 'reviewer']) {
+function paintSettings() {
+  const locked = Boolean(controller) || verifyingFiles;
+  for (const role of modelRoles) {
     const file = pendingFiles[role];
     const label = $(`${role}-file-name`);
-    label.textContent = file ? file.name : role === 'driver' ? 'No file selected' : 'Reuse driver model';
+    label.textContent = file ? file.name : role === 'driver' ? 'No file selected' : 'Uses the driver if left empty';
     label.title = file?.name ?? '';
+    $(`${role}-file`).disabled = locked;
   }
   $('reuse-driver').hidden = !pendingFiles.reviewer;
+  $('clear-models').hidden = !files.driver && !pendingFiles.driver && !pendingFiles.reviewer;
+  for (const id of ['reuse-driver', 'clear-models', 'apply-models']) $(id).disabled = locked;
+  $('apply-label').textContent = verifyingFiles ? 'Checking files…' : 'Use models';
+  $('settings-busy').hidden = !controller;
 }
 
-function openModels() {
-  if (controller) return;
-  setupEpoch += 1;
-  pendingFiles = { ...files };
-  $('models-form').reset();
-  $('apply-models').disabled = false;
-  modelError();
-  paintFileChoices();
-  modelsDialog.showModal();
-}
-
-for (const button of modelButtons) button.addEventListener('click', openModels);
 for (const button of document.querySelectorAll('[data-guide]')) button.addEventListener('click', () => $('guide-dialog').showModal());
 for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
-for (const role of ['driver', 'reviewer']) {
+for (const role of modelRoles) {
   $(`${role}-file`).addEventListener('change', (event) => {
-    if (event.target.files[0]) pendingFiles[role] = event.target.files[0];
+    const input = event.target;
+    if (!input.files[0]) return;
+    pendingFiles[role] = input.files[0];
+    input.value = '';
     modelError();
-    paintFileChoices();
+    paintSettings();
   });
 }
 $('reuse-driver').addEventListener('click', () => {
   pendingFiles.reviewer = null;
-  $('reviewer-file').value = '';
-  paintFileChoices();
+  paintSettings();
   $('reviewer-file').focus();
   modelError();
 });
-$('use-demo').addEventListener('click', () => {
+$('clear-models').addEventListener('click', () => {
   files = { driver: null, reviewer: null };
-  modelsDialog.close();
-  paintModels();
-  toast('Switched to the scripted demo.');
-});
-$('models-form').addEventListener('submit', (event) => event.preventDefault());
-$('apply-models').addEventListener('click', async () => {
-  const epoch = setupEpoch;
-  const chosen = { ...pendingFiles };
-  $('apply-models').disabled = true;
+  pendingFiles = { ...files };
   modelError();
+  paintModels();
+  $('driver-file').focus();
+  toast('Model selections cleared. Downloaded files were not deleted.');
+});
+modelForm.addEventListener('submit', (event) => event.preventDefault());
+$('apply-models').addEventListener('click', async () => {
+  if (controller || verifyingFiles) return;
+  const chosen = { ...pendingFiles };
+  verifyingFiles = true;
+  modelError();
+  paintSettings();
+  let role = 'driver';
+  let invalid;
   try {
     await validateModel(chosen.driver);
-    if (chosen.reviewer) await validateModel(chosen.reviewer);
-    if (epoch !== setupEpoch || !modelsDialog.open || chosen.driver !== pendingFiles.driver || chosen.reviewer !== pendingFiles.reviewer) return;
+    if (chosen.reviewer) {
+      role = 'reviewer';
+      await validateModel(chosen.reviewer);
+    }
+    if (currentView !== 'settings') return;
     files = chosen;
-    modelsDialog.close();
     paintModels();
-    toast('Local models selected. Run a relay to start them.');
+    location.hash = 'workspace';
+    toast('Models are ready for this tab.');
   } catch (error) {
-    if (epoch === setupEpoch && modelsDialog.open) modelError(error instanceof Error ? error.message : 'Could not read that file.');
+    if (currentView === 'settings') {
+      invalid = role;
+      const message = error instanceof Error ? error.message : 'Could not read that file.';
+      modelError(`${role === 'driver' ? 'Driver' : 'Reviewer'} model: ${message}`, role);
+    }
   } finally {
-    if (epoch === setupEpoch) $('apply-models').disabled = false;
+    verifyingFiles = false;
+    paintSettings();
+    if (invalid) $(`${invalid}-file`).focus();
   }
-});
-modelsDialog.addEventListener('close', () => {
-  if (modelsDialog.open) return;
-  setupEpoch += 1;
-  $('models-form').reset();
-  pendingFiles = undefined;
 });
 
 // No native form submission: the same actions work in iframe previews without allow-forms.
 form.addEventListener('submit', (event) => event.preventDefault());
 $('run-button').addEventListener('click', runRelay);
 async function runRelay() {
-  if (controller) return;
-  const useLocal = engine() === 'local';
-  if (!prompt.value.trim() && !useLocal) {
-    prompt.value = EXAMPLES[0].prompt;
-    paintPrompt();
+  if (controller || currentView !== 'workspace') return;
+  if (!files.driver) {
+    location.hash = 'settings';
+    return;
   }
   let run;
   try {
     // A timestamp and tab-local sequence also work in non-secure preview contexts.
     run = createRun({
       id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${++runSequence}`,
-      prompt: prompt.value, mode: mode(), engine: engine(),
-      names: useLocal
-        ? { driver: modelName(files.driver), reviewer: modelName(files.reviewer ?? files.driver) }
-        : { driver: 'Demo driver', reviewer: 'Demo reviewer' },
+      prompt: prompt.value, mode: mode(),
+      names: { driver: modelName(files.driver), reviewer: modelName(files.reviewer ?? files.driver) },
     });
   } catch (error) {
     setPromptError(error.message);
@@ -330,16 +329,15 @@ async function runRelay() {
   controller = new AbortController();
   visibleRun = run;
   livePhase = selection = undefined;
-  let runtime;
+  const runtime = browserEngine(files, (key, phase) => { livePhase = { key, phase }; paintTimeline(); });
   const buttonHadFocus = document.activeElement === $('run-button');
   setBusy(true);
   if (buttonHadFocus) $('stop-button').focus({ preventScroll: true });
   paintHistory();
-  announce(`${engineName(run.engine)} relay started.`);
-  if (useLocal) runtime = browserEngine(files, (key, phase) => { livePhase = { key, phase }; paintTimeline(); });
+  announce('Local relay started.');
   try {
     await executeRelay(run, {
-      generate: runtime?.generate ?? demoGenerator(run.prompt),
+      generate: runtime.generate,
       signal: controller.signal,
       onUpdate: paintRun,
     });
@@ -348,13 +346,13 @@ async function runRelay() {
     announce(`Relay ${STATE_LABELS[run.state].toLowerCase()}. See relay output.`);
     if (!saved) toast('Browser storage is unavailable. History will only last in this tab.');
   } finally {
-    runtime?.dispose();
+    runtime.dispose();
     controller = undefined;
     const restoreFocus = document.activeElement === $('stop-button');
     setBusy(false);
     if (restoreFocus) $('run-button').focus({ preventScroll: true });
     paintHistory();
-    if (!inHistory() && run.state !== 'stopped') $('result').scrollIntoView({ block: 'nearest' });
+    if (currentView === 'workspace' && run.state !== 'stopped') $('result').scrollIntoView({ block: 'nearest' });
   }
 }
 
@@ -418,10 +416,10 @@ $('confirm-clear').addEventListener('click', () => {
 window.addEventListener('storage', (event) => {
   if (event.storageArea !== storage || (event.key !== HISTORY_KEY && event.key !== null)) return;
   history = readHistory(storage);
-  if (inHistory()) paintHistory();
+  if (currentView === 'history') paintHistory();
 });
 window.addEventListener('hashchange', () => {
-  if (!location.hash || ['#workspace', '#history'].includes(location.hash)) route(true);
+  if (!location.hash || Object.hasOwn(views, location.hash.slice(1))) route(true);
 });
 
 if (/Mac|iPhone|iPad/.test(navigator.platform)) $('modifier').textContent = '⌘';

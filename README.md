@@ -13,13 +13,15 @@ npm ci
 npm start
 ```
 
-Open `http://localhost:3000` (or the Arena live preview). Click **Run demo** to see a scripted relay without downloading a model. The demo does not generate answers to custom prompts.
+Open `http://localhost:3000` (or the Arena live preview) in a current desktop version of Chrome or Edge.
 
-### Run real AI locally
+### Set up your models
 
-1. Download a small instruction-tuned GGUF model. For example, pick the `q4_k_m.gguf` variant from [Qwen2.5 0.5B Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main).
-2. In a current desktop Chrome or Edge browser, open **Models**, select the file as **Driver model**, and click **Apply models**. Add a second compatible GGUF as **Reviewer** for different models, or leave it blank to use the driver model in both roles.
-3. Enter a prompt and click **Run relay**. The browser uses [wllama](https://github.com/ngxson/wllama) and WebAssembly to run the models on the CPU. Larger files are slower and can exceed the browser’s memory; start small. If the embedded preview limits workers, open the preview in its own tab.
+1. Open **Settings** or select **Set up models**. Under **Find model files**, download one of these free, instruction-tuned GGUFs:
+   - [Qwen2.5 0.5B Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true) — `qwen2.5-0.5b-instruct-q4_k_m.gguf` (491 MB).
+   - [SmolLM2 360M Instruct](https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf) — `SmolLM2-360M-Instruct-Q4_K_M.gguf` (271 MB), a smaller option.
+2. Select the downloaded file as **Driver model**. You can select a second file as **Reviewer model** or leave it blank to reuse the driver. Select **Use models** to return to the relay desk.
+3. Enter a prompt and select **Run relay**. The browser uses [wllama](https://github.com/ngxson/wllama) and WebAssembly to run the models on the CPU. Start with a small model; larger files run more slowly and can exceed the browser’s memory. If the embedded preview limits workers, open the preview in its own tab.
 
 Model files and prompts are never uploaded. Only one model is loaded into memory at a time. Reselect models after a reload. The last 16 runs are stored in this browser’s local storage when available; they are not encrypted or synced. Use **Run history → Clear history** to remove them.
 

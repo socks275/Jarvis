@@ -17,6 +17,7 @@
     <symbol id="i-workspace" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9h17m-12 0v10.5"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 2.35 5.65M4 6v6h6m2-4v4l2.5 1.5"/></symbol>
     <symbol id="i-model" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M5 4v6m0 4v6m7-16v2m0 4v10m7-16v10m0 4v2M3 10h4v4H3zm7-4h4v4h-4zm7 8h4v4h-4z"/></symbol>
     <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .72-1.5 1-1.5 2m0 3h.01"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6m0-6-9 9m8 0v5H5V6h5"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
@@ -33,6 +34,7 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1.5"/><path d="M15 5H6a1 1 0 0 0-1 1v9"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4m-4 4 4-4 4 4M5 14v5h14v-5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m-4-4 4 4 4-4M5 15v5h14v-5"/></symbol>
   </svg>
 
   <a class="skip-link" href="#main">Skip to content</a>
@@ -47,7 +49,7 @@
         <a class="nav-control" href="#workspace" data-view="workspace" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-workspace"/></svg><span>Relay desk</span></a>
         <a class="nav-control" href="#history" data-view="history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Run history</span></a>
         <p class="nav-label nav-label-second">RESOURCES</p>
-        <button class="nav-control" type="button" data-models><svg class="icon" aria-hidden="true"><use href="#i-model"/></svg><span>Models</span></button>
+        <a class="nav-control" href="#settings" data-view="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></a>
         <button class="nav-control" type="button" data-guide><svg class="icon" aria-hidden="true"><use href="#i-help"/></svg><span>Guide</span></button>
       </nav>
       <div class="rail-foot">
@@ -113,17 +115,17 @@
                 <div class="prompt-label"><label for="prompt">Your prompt</label><span id="prompt-count">0 / 1,600</span></div>
                 <textarea id="prompt" name="prompt" rows="4" maxlength="1600" placeholder="What are we working on? Describe a draft, a question, or a plan you want a second opinion on…" aria-describedby="prompt-message"></textarea>
                 <p class="field-message" id="prompt-message" hidden></p>
-                <div class="examples" id="examples"><span>Try an example</span></div>
                 <div class="roles">
-                  <div class="role"><span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span><div><span class="role-label">DRIVER</span><strong id="driver-name" class="role-name">Demo driver</strong></div></div>
+                  <div class="role"><span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span><div><span class="role-label">DRIVER</span><strong id="driver-name" class="role-name">Not set</strong></div></div>
                   <span class="role-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow"/></svg></span>
-                  <div class="role"><span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span><div><span class="role-label">REVIEWER</span><strong id="reviewer-name" class="role-name">Demo reviewer</strong></div></div>
-                  <button type="button" class="button text-button configure" data-models>Configure<span class="sr-only"> models</span></button>
+                  <div class="role"><span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span><div><span class="role-label">REVIEWER</span><strong id="reviewer-name" class="role-name">Not set</strong></div></div>
+                  <a href="#settings" class="button text-button configure" id="configure-models" hidden>Model settings</a>
                 </div>
                 <div class="form-footer">
-                  <button id="run-button" class="button primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span id="run-label">Run demo</span></button>
+                  <a href="#settings" class="button primary" id="setup-button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> Set up models</a>
+                  <button id="run-button" class="button primary" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span id="run-label">Run relay</span></button>
                   <button id="stop-button" class="button border-button" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg> Stop relay</button>
-                  <span class="hotkey"><kbd id="modifier">Ctrl</kbd> <kbd>Enter</kbd></span>
+                  <span class="hotkey" id="run-hotkey" hidden><kbd id="modifier">Ctrl</kbd> <kbd>Enter</kbd></span>
                 </div>
               </form>
             </section>
@@ -136,10 +138,10 @@
               </div>
               <div class="progress" id="progress" aria-hidden="true"></div>
               <ol class="steps" id="steps" aria-label="Relay steps"></ol>
-              <div class="snitch-note" id="engine-note">
+              <div class="snitch-note">
                 <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
-                <div><strong id="note-title">You’re in demo mode</strong><p id="note-body">Try a scripted relay with no setup, or load a free model for real AI responses.</p>
-                <button type="button" class="button text-button" data-models id="note-action">Use local AI <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
+                <div><strong id="note-title">No models loaded</strong><p id="note-body">Choose a GGUF model in Settings to run a relay. One file can play both roles.</p>
+                <a href="#settings" class="button text-button" id="note-action">Find model files <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
               </div>
             </aside>
           </div>
@@ -158,43 +160,78 @@
 
         <section class="history" id="view-history" aria-labelledby="history-title" hidden>
           <p class="eyebrow hero-kicker"><span class="hairline"></span> SAVED ON THIS DEVICE</p>
-          <div class="history-heading"><div><h1 id="history-title" tabindex="-1">Run history</h1><p>Revisit relays saved in this browser. Clearing browser data also erases this list.</p></div><button class="button border-button" id="clear-history" type="button" hidden>Clear history</button></div>
+          <div class="page-heading"><div><h1 id="history-title" tabindex="-1">Run history</h1><p>Revisit relays saved in this browser. Clearing browser data also erases this list.</p></div><button class="button border-button" id="clear-history" type="button" hidden>Clear history</button></div>
           <div class="panel history-empty" id="history-empty">
             <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></span><h2>No runs yet</h2><p>Your relays will show up here after you run them.</p><a class="button primary" href="#workspace">Start a relay <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
           </div>
           <ul class="history-list" id="history-list"></ul>
         </section>
+
+        <section id="view-settings" aria-labelledby="settings-title" hidden>
+          <p class="eyebrow hero-kicker"><span class="hairline"></span> ON-DEVICE CONFIGURATION</p>
+          <div class="page-heading">
+            <div><h1 id="settings-title" tabindex="-1">Settings</h1><p>Choose which models run in your relay desk.</p></div>
+            <a href="#workspace" class="button border-button back-link"><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg> Back to relay desk</a>
+          </div>
+          <div class="settings-grid">
+            <section class="panel model-settings" aria-labelledby="models-title">
+              <div class="panel-heading">
+                <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-model"/></svg></span>
+                <div><h2 id="models-title">Model files</h2><p id="model-format">Choose one instruction-tuned <code>.gguf</code> file per role.</p></div>
+              </div>
+              <form id="models-form">
+                <label class="file-choice">
+                  <input type="file" accept=".gguf" id="driver-file" class="sr-only" aria-label="Driver model file" aria-describedby="driver-file-name model-format">
+                  <span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span>
+                  <span class="file-description"><strong>Driver model <small>Required</small></strong><span class="filename" id="driver-file-name">No file selected</span></span>
+                  <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
+                </label>
+                <label class="file-choice">
+                  <input type="file" accept=".gguf" id="reviewer-file" class="sr-only" aria-label="Reviewer model file (optional)" aria-describedby="reviewer-file-name model-format">
+                  <span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span>
+                  <span class="file-description"><strong>Reviewer model <small>Optional</small></strong><span class="filename" id="reviewer-file-name">Uses the driver if left empty</span></span>
+                  <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
+                </label>
+                <button type="button" id="reuse-driver" class="button text-button" hidden>Clear reviewer file</button>
+                <p class="field-message" id="model-error" role="alert" hidden></p>
+                <p class="model-tip" id="settings-busy" role="status" hidden>A relay is running. Stop it or wait before changing models.</p>
+                <div class="settings-actions">
+                  <button type="button" id="apply-models" class="button primary"><span id="apply-label">Use models</span> <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+                  <button type="button" id="clear-models" class="button border-button" hidden>Clear models</button>
+                </div>
+              </form>
+              <div class="snitch-note settings-note">
+                <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+                <div><strong>Files stay on your device</strong><p>Nothing is uploaded. The selection lasts for this tab; choose the same files again after a reload.</p></div>
+              </div>
+            </section>
+            <section class="panel model-settings" aria-labelledby="downloads-title">
+              <div class="panel-heading">
+                <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></span>
+                <div><h2 id="downloads-title">Find model files</h2><p>Free downloads from Hugging Face. Pick at least one.</p></div>
+              </div>
+              <ul class="downloads-list">
+                <li>
+                  <div class="download-head"><h3>Qwen2.5 0.5B Instruct</h3><span class="model-tag">491 MB</span></div>
+                  <p>A good first choice for the driver.</p>
+                  <code class="file-name">qwen2.5-0.5b-instruct-q4_k_m.gguf</code>
+                  <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" class="button border-button" target="_blank" rel="noreferrer" aria-label="Download Qwen2.5 0.5B Instruct GGUF"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download GGUF</a>
+                </li>
+                <li>
+                  <div class="download-head"><h3>SmolLM2 360M Instruct</h3><span class="model-tag">271 MB</span></div>
+                  <p>A smaller option for either role.</p>
+                  <code class="file-name">SmolLM2-360M-Instruct-Q4_K_M.gguf</code>
+                  <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" class="button border-button" target="_blank" rel="noreferrer" aria-label="Download SmolLM2 360M Instruct GGUF"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download GGUF</a>
+                </li>
+              </ul>
+              <p class="model-tip">Use the downloaded <code>.gguf</code> as-is in a current desktop version of Chrome or Edge. Each file must be under 1.2 GB.</p>
+            </section>
+          </div>
+        </section>
         <footer class="footer"><span>FRENEMY / RELAY DESK</span><span>FREE &amp; OPEN SOURCE</span></footer>
       </main>
     </div>
   </div>
-
-  <dialog class="dialog" id="models-dialog" aria-labelledby="models-title">
-    <div class="dialog-header">
-      <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-model"/></svg></span>
-      <button type="button" class="button icon-button" data-close aria-label="Close model setup"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
-    </div>
-    <h2 id="models-title">Use local models</h2>
-    <p>Choose an instruction-tuned <code>.gguf</code> file from your device. One model can play both roles, or you can give the reviewer a different model.</p>
-    <form id="models-form">
-      <label class="file-choice">
-        <input type="file" accept=".gguf" id="driver-file" class="sr-only" aria-label="Driver model file" aria-describedby="driver-file-name model-tip">
-        <span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span>
-        <span><strong>Driver model</strong><span class="filename" id="driver-file-name">No file selected</span></span>
-        <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
-      </label>
-      <label class="file-choice">
-        <input type="file" accept=".gguf" id="reviewer-file" class="sr-only" aria-label="Reviewer model file (optional)" aria-describedby="reviewer-file-name model-tip">
-        <span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span>
-        <span><strong>Reviewer <small>(optional)</small></strong><span class="filename" id="reviewer-file-name">Reuse driver model</span></span>
-        <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
-      </label>
-      <button type="button" id="reuse-driver" class="button text-button" hidden>Clear reviewer file</button>
-      <p class="model-tip" id="model-tip">In current desktop Chrome or Edge, start with a small model: choose a Q4_K_M file for <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main" target="_blank" rel="noreferrer">Qwen2.5 0.5B Instruct <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>. Files never upload; choose them again after a reload.</p>
-      <p class="field-message" id="model-error" role="alert" hidden></p>
-      <div class="dialog-actions"><button type="button" id="use-demo" class="button border-button">Use demo</button><button type="button" id="apply-models" class="button primary">Apply models <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
-    </form>
-  </dialog>
 
   <dialog class="dialog" id="guide-dialog" aria-labelledby="guide-title">
     <div class="dialog-header">
@@ -205,7 +242,7 @@
     <dl class="guide-list">
       <div><dt>Draft &amp; review</dt><dd>The driver drafts a response, the reviewer critiques it, and the driver writes a final answer using that feedback.</dd></div>
       <div><dt>Compare answers</dt><dd>Both models answer the same prompt independently, so you can compare their approaches.</dd></div>
-      <div><dt>Demo vs. local AI</dt><dd>The demo uses scripted examples. With a GGUF model selected, inference runs on your CPU in a supported browser. No model downloads automatically, and prompts are never sent to a server.</dd></div>
+      <div><dt>Local models</dt><dd>In Settings, choose a GGUF file for the driver and optionally a different one for the reviewer. Models run on your CPU; files and prompts never go to a server.</dd></div>
     </dl>
     <p class="model-tip">The original <a href="https://github.com/noblehacks/frenemy" target="_blank" rel="noreferrer">Frenemy desktop tools</a> are separate. This web edition does not log into Claude, Codex, Gemini, or Kimi or run commands on your machine.</p>
     <div class="dialog-actions"><button type="button" class="button primary" data-close>Back to workspace</button></div>

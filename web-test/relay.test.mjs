@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EXAMPLES, demoGenerator } from '../web/demo.mjs';
 import {
   addToHistory, createRun, executeRelay, HISTORY_KEY, PROMPT_LIMIT, readHistory, resultStep, saveHistory,
 } from '../web/relay.mjs';
 
 const makeRun = (overrides = {}) => createRun({
-  id: 'test', prompt: 'Explain caching.', mode: 'review', engine: 'local',
+  id: 'test', prompt: 'Explain caching.', mode: 'review',
   names: { driver: 'Driver model', reviewer: 'Reviewer model' }, ...overrides,
 });
 
@@ -72,14 +71,15 @@ test('empty or failed model replies do not show a successful relay', async () =>
   }
 });
 
-test('the demo shows sample answers or identifies custom prompts as demonstration only', async () => {
-  const sample = EXAMPLES[0];
-  const run = makeRun({ engine: 'demo', prompt: sample.prompt });
-  const custom = makeRun({ engine: 'demo' });
-  await execute(run, { generate: demoGenerator(run.prompt, 0) });
-  await execute(custom, { generate: demoGenerator(custom.prompt, 0) });
-  assert.equal(run.steps[2].text, sample.final);
-  assert.match(custom.steps[0].text, /This demo does not generate an answer/);
+test('history removes legacy scripted runs while retaining local model runs', async () => {
+  const local = await execute(makeRun(), { generate: async () => 'A local response.' });
+  let stored = JSON.stringify([{ ...local, id: 'old-run', engine: 'demo' }, local]);
+  const storage = {
+    getItem: () => stored,
+    setItem: (key, value) => { stored = value; },
+  };
+  assert.deepEqual(readHistory(storage), [local]);
+  assert.deepEqual(JSON.parse(stored), [local]);
 });
 
 test('rejects invalid prompts and relay types', () => {
