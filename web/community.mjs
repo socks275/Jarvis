@@ -6,6 +6,9 @@ const FREE_TOKENS = 512; // The documented default free floor includes thinking 
 const MIN_TOKENS = 64;
 const DISCOVERY_TIMEOUT = 12_000;
 const RESPONSE_TIMEOUT = 150_000;
+// The decider only needs one word, so it must not stall the reply for a full queue wait.
+const TRIAGE_TIMEOUT = 45_000;
+const TRIAGE_TOKENS = 64;
 
 function waitSeconds(value) {
   if (!value) return 0;
@@ -179,7 +182,7 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
 
 export function planCommunityRequest(models, { messages, purpose, preferOtherThan }) {
   if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
-  const desired = purpose === 'review' ? 352 : FREE_TOKENS;
+  const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : FREE_TOKENS;
   let reduced;
   for (let context = messages; ; context = shorterContext(context)) {
     const input = estimateTokens(context);
@@ -218,7 +221,8 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
       };
       const complete = (body) => {
         onPhase('waiting');
-        return request('/chat/completions', { body, fetchImpl, signal, timeout: RESPONSE_TIMEOUT, onText,
+        const timeout = purpose === 'triage' ? TRIAGE_TIMEOUT : RESPONSE_TIMEOUT;
+        return request('/chat/completions', { body, fetchImpl, signal, timeout, onText,
           onQueue: (queue) => onPhase('waiting', queue) });
       };
       try {

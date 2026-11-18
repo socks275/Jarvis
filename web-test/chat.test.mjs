@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, newTurn, planAnswer, readChats, saveChats } from '../web/chat.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -68,6 +68,95 @@ test('picks the team size from the message: only small talk alone, requests in p
   assert.equal(planAnswer('Why does this npm test fail?').mode, 'panel');
   assert.equal(planAnswer('```js\nconst a = 1;\n```').mode, 'panel');
   assert.equal(planAnswer('hi', { deep: true }).mode, 'panel');
+});
+
+test('reads the decider’s one-word verdict however it is written', () => {
+  assert.equal(readDecision('two'), 'pair');
+  assert.equal(readDecision('2'), 'pair');
+  assert.equal(readDecision('Three models.'), 'panel');
+  assert.equal(readDecision('**one**'), 'solo');
+  assert.equal(readDecision('single'), 'solo');
+  assert.equal(readDecision('Two models, not three.'), 'pair');
+  assert.equal(readDecision('I cannot help'), undefined);
+  assert.equal(readDecision(''), undefined);
+});
+
+test('one model decides the team size, and its verdict overrides the built-in guess', async () => {
+  const calls = [], triagePrompts = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'hi' }],
+    signal: signal(), decide: true,
+    generate: async (request) => {
+      calls.push(request.purpose);
+      if (request.purpose === 'triage') {
+        triagePrompts.push(request.messages);
+        return { text: 'two', model: 'decider-model' };
+      }
+      if (request.purpose === 'draft') return { text: 'Draft', model: 'model-a' };
+      return { text: 'Final', model: 'model-b' };
+    },
+  });
+  // "hi" would be answered alone, but the decider asked for a second model.
+  assert.deepEqual(calls, ['triage', 'draft', 'final']);
+  assert.equal(triagePrompts[0].length, 2);
+  assert.match(triagePrompts[0].at(-1).content, /hi/);
+  assert.deepEqual(result.team, [{ role: 'triage', model: 'decider-model', pick: 'pair' },
+    { role: 'draft', model: 'model-a' }, { role: 'final', model: 'model-b' }]);
+  assert.equal(result.text, 'Final');
+});
+
+test('a decider that chooses one model is taken at its word and the trail records it', async () => {
+  const calls = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why does my npm test fail?' }],
+    signal: signal(), decide: true,
+    generate: async (request) => {
+      calls.push(request.purpose);
+      if (request.purpose === 'triage') return { text: 'one', model: 'decider-model' };
+      return { text: 'Single answer', model: 'model-a' };
+    },
+  });
+  assert.deepEqual(calls, ['triage', 'answer']);
+  assert.equal(result.text, 'Single answer');
+  assert.deepEqual(result.team, [{ role: 'triage', model: 'decider-model', pick: 'solo' },
+    { role: 'answer', model: 'model-a' }]);
+});
+
+test('a broken or unreadable decider falls back to the built-in guess', async () => {
+  const messages = [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why does my npm test fail?' }];
+  for (const verdict of [null, 'banana']) {
+    const calls = [];
+    await answerChat({
+      messages, signal: signal(), decide: true,
+      generate: async (request) => {
+        calls.push(request.purpose);
+        if (request.purpose === 'triage') {
+          if (verdict === null) throw new Error('No model could decide.');
+          return { text: verdict, model: 'decider-model' };
+        }
+        if (request.purpose === 'draft') return { text: 'Draft', model: 'model-a' };
+        if (request.purpose === 'review') return { text: 'Notes', model: 'model-b' };
+        return { text: 'Final', model: 'model-c' };
+      },
+    });
+    // The message is code, so the guess is the three-model panel.
+    assert.deepEqual(calls, ['triage', 'draft', 'review', 'final']);
+  }
+});
+
+test('Think deeper skips the vote and goes straight to the full panel', async () => {
+  const calls = [];
+  await answerChat({
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'hi' }],
+    signal: signal(), decide: true, deep: true,
+    generate: async (request) => {
+      calls.push(request.purpose);
+      if (request.purpose === 'draft') return { text: 'Draft', model: 'model-a' };
+      if (request.purpose === 'review') return { text: 'Notes', model: 'model-b' };
+      return { text: 'Final', model: 'model-c' };
+    },
+  });
+  assert.deepEqual(calls, ['draft', 'review', 'final']);
 });
 
 test('a normal question has one model draft and a second model finish it', async () => {

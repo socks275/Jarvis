@@ -217,22 +217,28 @@ function scrollToEnd() { scroll.scrollTop = scroll.scrollHeight; $('scroll-lates
 function syncScroll() { $('scroll-latest').hidden = !current || nearEnd(); }
 
 const roleActive = {
-  answer: 'is answering', draft: 'is writing a draft', review: 'is checking the draft', final: 'is writing the final answer',
+  triage: 'is choosing the team', answer: 'is answering', draft: 'is writing a draft',
+  review: 'is checking the draft', final: 'is writing the final answer',
 };
 const roleDone = {
-  answer: 'answered', draft: 'wrote a draft', review: 'checked the draft', final: 'wrote the final answer',
+  triage: 'chose the team', answer: 'answered', draft: 'wrote a draft',
+  review: 'checked the draft', final: 'wrote the final answer',
 };
+const pickedModels = { solo: 'one model', pair: 'a team of two', panel: 'a team of three' };
 
 function modelName(model) {
   const name = typeof model === 'string' ? model.trim() : '';
   return name.length > 34 ? `${name.slice(0, 33)}…` : name;
 }
 
-const roleSubject = { answer: 'A model', draft: 'A model', review: 'Another model', final: 'A new model' };
+const roleSubject = { triage: 'A model', answer: 'A model', draft: 'A model', review: 'Another model', final: 'A new model' };
 
 function teamChip(step, live = false) {
   const who = modelName(step.model) || roleSubject[step.role];
-  const chip = el('span', 'team-step', `${who} ${live ? roleActive[step.role] : roleDone[step.role]}`);
+  let action = live ? roleActive[step.role] : roleDone[step.role];
+  // The decider's verdict is the interesting part, not the verb.
+  if (!live && step.role === 'triage' && pickedModels[step.pick]) action = `chose ${pickedModels[step.pick]}`;
+  const chip = el('span', 'team-step', `${who} ${action}`);
   if (step.model) chip.title = step.model;
   if (live) {
     chip.dataset.live = '';
@@ -244,12 +250,18 @@ function teamChip(step, live = false) {
   return chip;
 }
 
-// The trail of models that worked on one reply: who drafted, who checked, who finished.
+// The trail of models that worked on one reply: who decided, drafted, checked, finished.
 function teamParts(steps = [], current) {
-  const total = steps.length + (current?.state === 'active' ? 1 : 0);
-  if (total < 2) return [];
-  return [el('span', 'team-count', `${total} models`), ...steps.map((step) => teamChip(step)),
-    ...(current?.state === 'active' ? [teamChip(current, true)] : [])];
+  const live = current?.state === 'active';
+  const entries = [...steps, ...(live ? [current] : [])];
+  if (entries.length < 2) return [];
+  // Count different models, since one model can appear twice (decider and drafter).
+  const distinct = new Set(entries.map((step) => step.model).filter(Boolean)).size;
+  return [
+    ...(distinct > 1 ? [el('span', 'team-count', `${distinct} models`)] : []),
+    ...steps.map((step) => teamChip(step)),
+    ...(live ? [teamChip(current, true)] : []),
+  ];
 }
 
 function teamNode(steps = [], current) {
@@ -274,6 +286,7 @@ function phaseText(job) {
   if (step) {
     const named = modelName(step.model);
     const queue = queueText(job);
+    if (step.role === 'triage') return `${named ? `${named} is choosing how many models should answer…` : 'Choosing how many models should answer…'}${queue ? ` · ${queue}` : ''}`;
     if (step.role === 'answer') return `${named ? `${named} is answering…` : 'Writing a reply…'}${queue ? ` · ${queue}` : ''}`;
     const base = `${named || roleSubject[step.role]} ${roleActive[step.role]}…`;
     return queue ? `${base} · ${queue}` : base;
@@ -517,6 +530,7 @@ async function generate(chat, message) {
     // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
       signal: controller.signal, deep: message.deep, mode: message.engine === 'local' ? 'solo' : undefined,
+      decide: message.engine === 'community',
       onText(text) { message.text = text; refreshStream(job); },
       onStep(step) {
         job.step = step;

@@ -97,20 +97,73 @@ function teamStep(role, model) {
   return step;
 }
 
+const MODES = ['solo', 'pair', 'panel'];
+
+/** Reads the decider model's one-word verdict, tolerating extra words or punctuation. */
+export function readDecision(text) {
+  const value = String(text ?? '').toLowerCase();
+  const found = [];
+  const scan = (pattern, mode) => {
+    const match = pattern.exec(value);
+    if (match) found.push({ at: match.index, mode });
+  };
+  scan(/\b(?:panel|three|3)\b/, 'panel');
+  scan(/\b(?:pair|two|2)\b/, 'pair');
+  scan(/\b(?:solo|single|one|1)\b/, 'solo');
+  // The first number it mentions is its verdict, even if it then explains itself.
+  found.sort((a, b) => a.at - b.at);
+  return found[0]?.mode;
+}
+
+// A short, cheap question: the decider never sees the whole conversation.
+function decisionMessages(latest) {
+  return [
+    { role: 'system', content: 'You choose how many AI models should answer one message. Reply with exactly one word: one, two, or three.' },
+    { role: 'user', content: `Rules:
+- one: greetings, thanks, or small talk that needs no real answer.
+- two: any question or request that needs an answer.
+- three: coding, maths, planning, or anything long, risky or easy to get wrong.
+
+Message:
+${String(latest ?? '').slice(0, 400)}` },
+  ];
+}
+
 /**
  * Two or three models work on the same reply and their steps are named, so the
  * page can show which model drafted, checked and finished the answer.
  * `onStep` reports progress; `onText` streams the text the reader should see.
  */
-export async function answerChat({ messages, generate, signal, deep = false, mode, onText = () => {}, onStep = () => {} }) {
-  const plan = mode ? { mode } : planAnswer(messages.at(-1)?.content, { deep });
-  if (plan.mode === 'solo') {
+export async function answerChat({ messages, generate, signal, deep = false, mode, decide = false, onText = () => {}, onStep = () => {} }) {
+  const latest = messages.at(-1)?.content;
+  const guess = mode ? { mode } : planAnswer(latest, { deep });
+  const steps = [];
+  let chosen = guess.mode;
+  // One model decides how many models should answer. The built-in guess is the
+  // safety net if that model is unavailable or replies with something unusable.
+  // "Think deeper" is an explicit request for the full panel, so it skips the vote.
+  if (decide && !mode && !deep) {
+    onStep({ role: 'triage', state: 'active' });
+    try {
+      const verdict = await generate({ messages: decisionMessages(latest), signal, purpose: 'triage' });
+      signal.throwIfAborted();
+      const pick = readDecision(verdict.text) ?? guess.mode;
+      const step = { ...teamStep('triage', verdict.model), pick };
+      steps.push(step);
+      onStep({ ...step, state: 'done' });
+      chosen = pick;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // Keep the built-in guess and carry on: the answer matters more than the vote.
+    }
+  }
+  if (chosen === 'solo') {
     onStep({ role: 'answer', state: 'active' });
     const answer = await generate({ messages, signal, onText, purpose: 'answer' });
-    onStep({ ...teamStep('answer', answer.model), state: 'done' });
-    return answer;
+    steps.push(teamStep('answer', answer.model));
+    onStep({ ...steps.at(-1), state: 'done' });
+    return steps.length > 1 ? { ...answer, team: steps } : answer;
   }
-  const steps = [];
   // The draft streams straight into the page so a reply is visible while the
   // other models are still queued.
   onStep({ role: 'draft', state: 'active' });
@@ -119,7 +172,7 @@ export async function answerChat({ messages, generate, signal, deep = false, mod
   onStep({ ...steps.at(-1), state: 'done' });
   signal.throwIfAborted();
   try {
-    if (plan.mode === 'panel') {
+    if (chosen === 'panel') {
       onStep({ role: 'review', state: 'active' });
       const review = await generate({
         messages: followUp(messages,
@@ -170,8 +223,9 @@ function validChat(item) {
       && (i % 2 ? m.role === 'assistant' && isStatus(m.status) && isEngine(m.engine)
         && (m.model === undefined || isText(m.model, 300)) && (m.warning === undefined || isText(m.warning, 600))
         && (m.deep === undefined || typeof m.deep === 'boolean') && (m.limited === undefined || typeof m.limited === 'boolean')
-        && (m.team === undefined || (Array.isArray(m.team) && m.team.length > 0 && m.team.length <= 3
-          && m.team.every((s) => s && ['answer', 'draft', 'review', 'final'].includes(s.role) && (s.model === undefined || isText(s.model, 300)))))
+        && (m.team === undefined || (Array.isArray(m.team) && m.team.length > 0 && m.team.length <= 4
+          && m.team.every((s) => s && ['triage', 'answer', 'draft', 'review', 'final'].includes(s.role)
+            && (s.model === undefined || isText(s.model, 300)) && (s.pick === undefined || MODES.includes(s.pick)))))
         : m.role === 'user' && m.text.trim()));
 }
 
