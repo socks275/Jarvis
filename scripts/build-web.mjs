@@ -17,6 +17,8 @@ const assets = [
   ['uc.micro/LICENSE.txt', 'licenses/uc.micro.txt'],
   ['@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2', 'fonts/manrope.woff2'],
   ['@fontsource-variable/manrope/LICENSE', 'licenses/manrope.txt'],
+  ['@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff2', 'fonts/instrument-serif-italic.woff2'],
+  ['@fontsource/instrument-serif/LICENSE', 'licenses/instrument-serif.txt'],
   ['@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2', 'fonts/jetbrains-mono.woff2'],
   ['@fontsource-variable/jetbrains-mono/LICENSE', 'licenses/jetbrains-mono.txt'],
 ];

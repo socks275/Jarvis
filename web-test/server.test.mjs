@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
@@ -13,6 +13,7 @@ test('preview serves static assets on proxy hosts and not files outside the site
   await writeFile(join(root, 'index.html'), '<title>Frenemy</title>');
   await writeFile(join(root, 'app.mjs'), 'export {};');
   await writeFile(join(root, 'engine.wasm'), new Uint8Array([0, 97, 115, 109]));
+  await copyFile(new URL('../web/glass-spark-small.webp', import.meta.url), join(root, 'spark.webp'));
   await writeFile(join(dir, 'private.txt'), 'must not be served');
   const server = staticSite(root).listen(0, '127.0.0.1');
   try {
@@ -29,6 +30,10 @@ test('preview serves static assets on proxy hosts and not files outside the site
     assert.equal(wasm.headers.get('content-type'), 'application/wasm');
     assert.equal(wasm.headers.get('content-length'), '4');
     assert.equal(await wasm.text(), '');
+    const artwork = await fetch(`${url}/spark.webp`);
+    assert.equal(artwork.status, 200);
+    assert.equal(artwork.headers.get('content-type'), 'image/webp');
+    assert.equal(Buffer.from(await artwork.arrayBuffer()).toString('ascii', 8, 12), 'WEBP');
     for (const path of ['/..%2Fprivate.txt', '/private.txt', '/desktop/install.mjs', '/.git/config']) {
       const rejected = await fetch(`${url}${path}`);
       assert.equal(rejected.status, 404, path);
