@@ -1,534 +1,653 @@
-import { browserEngine, validateModel } from './engine.mjs';
+import MarkdownIt from './vendor/markdown-it.mjs';
+import { createFormatter } from './format.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, readChats, saveChats } from './chat.mjs';
 import { communityEngine, getOnlineModels } from './community.mjs';
-import {
-  ENGINE_LABELS, HISTORY_KEY, MODE_LABELS, PLANS, PROMPT_LIMIT, STATE_LABELS,
-  addToHistory, createRun, executeRelay, readHistory, resultStep, saveHistory,
-} from './relay.mjs';
+import { browserEngine, validateModel } from './engine.mjs';
 
 const $ = (id) => document.getElementById(id);
-const form = $('relay-form');
 const prompt = $('prompt');
-const modelForm = $('models-form');
-const communityDialog = $('community-dialog');
-const connections = [...$('connection-options').querySelectorAll('input[name=connection]')];
-const modelRoles = ['driver', 'reviewer'];
-const views = {
-  workspace: { name: 'Relay desk', focus: 'main' },
-  history: { name: 'Run history', focus: 'history-title' },
-  settings: { name: 'Settings', focus: 'settings-title' },
+const thread = $('thread');
+const scroll = $('chat-scroll');
+const engineOptions = [...$('engine-options').querySelectorAll('input')];
+const mobile = matchMedia('(max-width: 700px)');
+const format = createFormatter(MarkdownIt);
+const date = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+const templates = {
+  explain: 'Explain how a black hole works using an everyday analogy.',
+  write: 'Draft a friendly, concise email asking to reschedule a meeting. Give me two tone options.',
+  ideas: 'Suggest five creative weekend projects I can finish at home, with a simple first step for each.',
+  plan: 'Help me make a realistic four-week plan to learn a new skill. Start by asking which skill I want to learn.',
 };
-const modes = [...form.querySelectorAll('input[name="mode"]')];
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const mode = () => modes.find((radio) => radio.checked).value;
-const modelName = (file) => (file.name.replace(/\.gguf$/i, '') || file.name).slice(0, 300);
 
 let storage;
-try { storage = window.localStorage; } catch { /* opaque or blocked browser context */ }
-let history = readHistory(storage);
-let files = { driver: null, reviewer: null };
-let pendingFiles = { ...files };
-let verifyingFiles = false;
-let connection = 'community';
+try { storage = window.localStorage; } catch { /* some embedded contexts deny storage */ }
+let chats = readChats(storage);
+let current;
+const drafts = new Map();
+let active;
+let pendingNodes;
+let streamFrame = 0;
+let engine = 'community';
+let localFile;
+let validatingFile = false;
+let deeper = false;
 let communityAllowed = false;
+let consentAction;
 let statusController;
-let onlineModels;
+let models;
 let networkError = '';
 let retryAt = 0;
 let retryTimer;
-let currentView = 'workspace';
-let visibleRun;
-let selection;
-let controller;
-let livePhase;
+let removeTarget;
+let desktopSidebar = true;
+let mobileSidebar = false;
+let warnedStorage = false;
 let toastTimer;
-let jumpToResult = false;
-let runSequence = 0;
 
-function element(tag, className, text) {
+function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
 }
 
-function announce(text) { $('announcer').textContent = text; }
-function toast(text) {
-  announce(text);
-  $('toast').textContent = text;
+function icon(name) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  const use = document.createElementNS(ns, 'use');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  use.setAttribute('href', `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function button(className, label, glyph, action) {
+  const node = el('button', className);
+  node.type = 'button';
+  if (glyph) node.append(icon(glyph));
+  node.append(label);
+  if (action) node.addEventListener('click', action);
+  return node;
+}
+
+function toast(message) {
+  $('toast').textContent = message;
   $('toast').hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3200);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3100);
 }
 
-function setPromptError(message = '') {
-  $('prompt-message').textContent = message;
-  $('prompt-message').hidden = !message;
-  if (message) prompt.setAttribute('aria-invalid', 'true');
-  else prompt.removeAttribute('aria-invalid');
-}
-
-function modelError(message = '', role) {
-  $('model-error').textContent = message;
-  $('model-error').hidden = !message;
-  for (const name of modelRoles) {
-    const input = $(`${name}-file`);
-    if (name === role && message) input.setAttribute('aria-invalid', 'true');
-    else input.removeAttribute('aria-invalid');
+function save() {
+  if (!saveChats(storage, chats) && !warnedStorage) {
+    warnedStorage = true;
+    toast('Browser storage is unavailable. Your chats will only last until you leave this page.');
   }
 }
 
-function paintPrompt() {
-  setPromptError();
-  $('prompt-count').textContent = `${prompt.value.length.toLocaleString('en-US')} / ${PROMPT_LIMIT.toLocaleString('en-US')}`;
+function sizePrompt() {
+  prompt.style.height = 'auto';
+  prompt.style.height = `${prompt.scrollHeight}px`;
 }
 
-function setBusy(active) {
-  const cooling = connection === 'community' && retryAt > Date.now();
-  prompt.readOnly = active;
-  for (const radio of modes) radio.disabled = active;
-  $('run-button').disabled = active || cooling || (connection === 'local' && !files.driver);
-  $('run-button').querySelector('use').setAttribute('href', active ? '#i-wave' : '#i-play');
-  $('run-label').textContent = active ? 'Running…' : 'Run relay';
-  $('stop-button').hidden = !active;
-  $('relay-cooldown').hidden = !cooling;
-  $('relay-cooldown').textContent = cooling ? 'AI Horde asked us to wait. You can try again when Run relay is enabled.' : '';
+function setSidebar(open, focus = false) {
+  if (mobile.matches) mobileSidebar = open;
+  else desktopSidebar = open;
+  paintSidebar();
+  if (focus) $(open ? 'new-chat' : 'sidebar-toggle').focus({ preventScroll: true });
+}
+
+function paintSidebar() {
+  const open = mobile.matches ? mobileSidebar : desktopSidebar;
+  document.body.dataset.sidebar = open ? 'open' : 'closed';
+  $('sidebar').inert = !open;
+  $('main').inert = mobile.matches && open;
+  $('sidebar-backdrop').hidden = !(mobile.matches && open);
+  const toggle = $('sidebar-toggle');
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.setAttribute('aria-label', open ? 'Hide sidebar' : 'Show sidebar');
+  toggle.title = toggle.getAttribute('aria-label');
+}
+
+function historyButton(chat, search = false) {
+  const node = el('button', 'history-button');
+  node.type = 'button';
+  node.title = chat.title;
+  node.append(icon('chat'), el('span', 'history-title', chat.title));
+  if (current === chat) node.setAttribute('aria-current', 'true');
+  if (active?.chat === chat) {
+    const mark = el('span', 'history-running');
+    mark.setAttribute('aria-label', 'Reply in progress');
+    node.append(mark);
+  }
+  if (search) node.append(el('span', 'search-date', date.format(chat.updatedAt)));
+  node.addEventListener('click', () => {
+    if (search) $('search-dialog').close();
+    openChat(chat);
+  });
+  const li = el('li');
+  li.append(node);
+  return li;
+}
+
+function paintHistory() {
+  $('history-empty').hidden = chats.length > 0;
+  $('chat-list').replaceChildren(...orderedChats(chats).slice(0, 32).map((chat) => historyButton(chat)));
+  if ($('search-dialog').open) paintSearch();
+}
+
+function paintSearch() {
+  const query = $('search-input').value.trim().toLowerCase();
+  const found = orderedChats(chats).filter((chat) => !query || chat.title.toLowerCase().includes(query)
+    || chat.messages.some((m) => m.text.toLowerCase().includes(query)));
+  $('search-empty').textContent = !found.length ? query ? 'No chats match that search.' : 'Start a chat to find it here later.' : '';
+  $('search-empty').hidden = Boolean(found.length);
+  $('search-results').replaceChildren(...found.slice(0, 32).map((chat) => historyButton(chat, true)));
+}
+
+function paintConnection() {
+  const community = engine === 'community';
+  const label = community ? 'Community AI' : 'On-device';
+  $('sidebar-engine').textContent = $('top-engine').textContent = label;
+  $('sidebar-engine-note').textContent = community ? 'Free · no key required' : localFile ? 'Model ready on this device' : 'Choose a GGUF file';
+  for (const id of ['sidebar-engine-icon', 'top-engine-icon']) $(id).setAttribute('href', community ? '#i-globe' : '#i-device');
+  paintComposer();
   paintSettings();
 }
 
-function paintModels() {
-  const community = connection === 'community';
-  const ready = community || Boolean(files.driver);
-  const driver = community ? 'Auto-select' : files.driver ? modelName(files.driver) : 'Not set';
-  const reviewer = community ? 'Prefer a different model' : files.reviewer ? modelName(files.reviewer) : files.driver ? 'Same as driver' : 'Not set';
-  $('driver-name').textContent = $('driver-name').title = driver;
-  $('reviewer-name').textContent = $('reviewer-name').title = reviewer;
-  $('setup-button').hidden = ready;
-  $('configure-models').hidden = !ready;
-  $('run-button').hidden = !ready;
-  $('run-hotkey').hidden = !ready;
-  $('note-title').textContent = community ? 'Online models, no download' : ready ? 'Models run on your device' : 'No models loaded';
-  $('note-body').textContent = community
-    ? 'Community runs send your prompt to AI Horde’s volunteer workers. Don’t include private information.'
-    : ready ? 'Relays use your CPU. Keep this tab open while a model is working.'
-      : 'Choose a GGUF model in Settings to run locally, or switch to Community AI.';
-  $('note-action').textContent = community ? 'Connection details' : 'Model settings';
-  $('runtime-badge').textContent = community ? 'Community AI' : 'On-device AI';
-  $('rail-runtime-title').textContent = community ? 'Community AI' : 'Local by design';
-  $('rail-runtime-detail').textContent = community ? 'No model downloads.' : 'Your prompts stay here.';
-  for (const id of ['header-runtime-icon', 'rail-runtime-icon']) $(id).setAttribute('href', community ? '#i-globe' : '#i-laptop');
-  $('hero-description').textContent = community
-    ? 'Draft, review, and refine with models that are online now. No model downloads, accounts, or personal keys.'
-    : 'Draft, review, and refine with open models on your device. Your prompts never leave this tab.';
-  setBusy(Boolean(controller));
+const cooling = () => engine === 'community' && retryAt > Date.now();
+const unavailable = () => engine === 'local' && !localFile;
+const blocked = () => Boolean(active || validatingFile || cooling() || unavailable());
+
+function paintComposer() {
+  const writing = Boolean(active && active.chat === current);
+  const busyElsewhere = Boolean(active && !writing);
+  const cooldown = cooling();
+  const needsFile = unavailable();
+  $('send-button').hidden = writing;
+  $('send-button').disabled = blocked() || !prompt.value.trim();
+  $('stop-button').hidden = !writing;
+  $('deep-button').hidden = engine === 'local';
+  $('deep-button').disabled = Boolean(active);
+  $('deep-button').setAttribute('aria-pressed', String(deeper));
+  $('composer-status').hidden = !(busyElsewhere || cooldown || needsFile);
+  $('composer-note').textContent = busyElsewhere ? 'Frenemy is replying in another chat.'
+    : cooldown ? 'The community network asked us to wait. You can send again when the cooldown ends.'
+      : needsFile ? 'Select a GGUF file to chat on-device.' : '';
+  $('open-busy').hidden = !busyElsewhere;
+  $('choose-model').hidden = busyElsewhere || !needsFile;
+  for (const retry of thread.querySelectorAll('[data-retry]')) retry.disabled = blocked();
 }
 
-function showOnlineModels(models) {
-  onlineModels = models;
-  networkError = '';
-  paintNetwork();
-}
-
-function paintNetwork() {
-  $('network-status').textContent = statusController ? 'Checking AI Horde…' : networkError || (onlineModels === undefined
-    ? 'Availability hasn’t been checked yet. Every relay checks again before each step.'
-    : onlineModels.length ? `${onlineModels.length} eligible models were online at the last check.`
-      : 'No eligible models were online at the last check. Try again later.');
-  $('online-models').replaceChildren(...(networkError ? [] : (onlineModels ?? []).slice(0, 5).map(({ id }) => element('li', '', id))));
-  $('check-network').disabled = Boolean(statusController || controller) || retryAt > Date.now();
-  $('reset-permission').hidden = !communityAllowed;
-  $('reset-permission').disabled = Boolean(controller);
-}
-
-function coolDown(seconds) {
+function showCooldown(seconds) {
   retryAt = Math.max(retryAt, Date.now() + seconds * 1000);
   clearTimeout(retryTimer);
-  retryTimer = setTimeout(() => { retryAt = 0; setBusy(Boolean(controller)); }, retryAt - Date.now());
-  setBusy(Boolean(controller));
-}
-
-function activeTimeline() {
-  const plan = PLANS[visibleRun?.mode ?? mode()];
-  return plan.map((stage, i) => {
-    const step = visibleRun?.steps[i];
-    const state = step?.state ?? 'waiting';
-    let detail = stage.detail;
-    if (state === 'running') {
-      const phase = livePhase?.key === stage.key ? livePhase.phase : '';
-      const name = visibleRun.names[stage.role];
-      detail = visibleRun.engine === 'community'
-        ? phase === 'waiting' ? 'Waiting for a volunteer model…' : 'Finding eligible online models…'
-        : phase === 'generating' ? `${name} is writing…` : `Loading ${name}…`;
-    } else if (state === 'done') detail = step.model ?? visibleRun.names[stage.role];
-    else if (state === 'failed' || state === 'stopped') detail = STATE_LABELS[state];
-    else if (['partial', 'failed', 'stopped'].includes(visibleRun?.state)) detail = 'Not run';
-    return { ...stage, state, detail };
-  });
-}
-
-function paintTimeline() {
-  const state = visibleRun?.state ?? 'idle';
-  $('run-state').dataset.state = state;
-  $('run-state-text').textContent = STATE_LABELS[state];
-  const segments = [];
-  const rows = activeTimeline().map((stage, i) => {
-    const segment = element('span', 'progress-segment');
-    segment.dataset.state = stage.state;
-    segments.push(segment);
-    const row = element('li', 'step');
-    row.dataset.state = stage.state;
-    const index = element('span', 'step-index', stage.state === 'done' ? '✓' : String(i + 1).padStart(2, '0'));
-    index.setAttribute('aria-hidden', 'true');
-    const info = element('div');
-    info.append(element('strong', 'step-name', stage.label), element('span', 'step-meta', stage.detail));
-    row.append(index, info);
-    if (stage.state === 'done') info.append(element('span', 'sr-only', 'Completed'));
-    if (stage.state === 'running') row.setAttribute('aria-current', 'step');
-    return row;
-  });
-  $('progress').replaceChildren(...segments);
-  $('steps').replaceChildren(...rows);
-}
-
-function paintResult() {
-  const run = visibleRun;
-  $('result').hidden = !run;
-  if (!run) return;
-  const shown = resultStep(run, selection);
-  $('result-description').textContent = `${MODE_LABELS[run.mode]} · ${ENGINE_LABELS[run.engine]} · ${STATE_LABELS[run.state]}`;
-  const selectedStep = run.steps.find((step) => step.key === shown);
-  const tabs = $('result-tabs');
-  const focusedKey = tabs.contains(document.activeElement) && document.activeElement.dataset.key;
-  const options = PLANS[run.mode].map((stage) => {
-    const active = stage.key === shown;
-    const button = element('button', 'tab', stage.tab);
-    button.type = 'button';
-    button.id = `tab-${stage.key}`;
-    button.dataset.key = stage.key;
-    button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', String(active));
-    button.setAttribute('aria-controls', 'result-panel');
-    button.tabIndex = active ? 0 : -1;
-    return button;
-  });
-  tabs.replaceChildren(...options);
-  if (focusedKey) options.find((tab) => tab.dataset.key === focusedKey)?.focus({ preventScroll: true });
-  const panel = $('result-panel');
-  panel.setAttribute('aria-labelledby', `tab-${shown}`);
-  panel.dataset.empty = String(!selectedStep.text);
-  panel.textContent = selectedStep.text || ({
-    running: 'Working on this stage…',
-    waiting: run.state === 'running' ? 'This stage hasn’t started.' : 'This stage did not run.',
-    failed: 'This stage did not return a response.',
-    stopped: 'This stage was stopped.',
-  }[selectedStep.state] ?? 'No response.');
-  $('copy-result').disabled = !selectedStep.text;
-  const selectedRole = PLANS[run.mode].find((stage) => stage.key === shown).role;
-  $('result-source').hidden = !selectedStep.text;
-  $('result-source').textContent = `Model: ${selectedStep.model ?? run.names[selectedRole]}${selectedStep.limited ? ' · Output limit reached' : ''}`;
-  $('result-error').hidden = !run.error;
-  $('result-error').textContent = run.state === 'partial' ? `Earlier responses are available. ${run.error}` : run.error;
-}
-
-function paintRun() { paintTimeline(); paintResult(); }
-
-function paintHistory() {
-  $('history-empty').hidden = Boolean(history.length);
-  $('clear-history').hidden = !history.length;
-  $('clear-history').disabled = Boolean(controller);
-  $('history-list').replaceChildren(...history.map((run) => {
-    const row = element('li', 'panel history-item');
-    const content = element('div');
-    const badge = element('span', 'run-state', STATE_LABELS[run.state]);
-    badge.dataset.state = run.state;
-    const message = element('p', 'history-prompt', run.prompt);
-    message.title = run.prompt;
-    const meta = element('p', 'history-meta', `${MODE_LABELS[run.mode]} · ${ENGINE_LABELS[run.engine]} · ${dateFormat.format(run.createdAt)}`);
-    content.append(badge, message, meta);
-    const open = element('button', 'button border-button history-open', 'Open run');
-    open.type = 'button';
-    open.disabled = Boolean(controller);
-    open.addEventListener('click', () => {
-      visibleRun = run;
-      selection = undefined;
-      for (const radio of modes) radio.checked = radio.value === run.mode;
-      prompt.value = run.prompt;
-      paintPrompt();
-      paintRun();
-      jumpToResult = true;
-      location.hash = 'workspace';
-    });
-    row.append(content, open);
-    return row;
-  }));
-}
-
-function route(moveFocus = false) {
-  const requested = location.hash.slice(1);
-  currentView = Object.hasOwn(views, requested) ? requested : 'workspace';
-  for (const name of Object.keys(views)) $(`view-${name}`).hidden = currentView !== name;
-  $('breadcrumb').textContent = views[currentView].name;
-  for (const link of document.querySelectorAll('[data-view]')) {
-    if (link.dataset.view === currentView) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  }
-  if (currentView === 'history') paintHistory();
-  if (currentView === 'workspace' && jumpToResult) {
-    jumpToResult = false;
-    $('result-title').focus({ preventScroll: true });
-    $('result').scrollIntoView({ block: 'nearest' });
-  } else if (moveFocus) {
-    window.scrollTo(0, 0);
-    $(views[currentView].focus).focus({ preventScroll: true });
-  }
+  retryTimer = setTimeout(() => { retryAt = 0; paintComposer(); paintSettings(); }, retryAt - Date.now());
+  paintComposer();
+  paintSettings();
 }
 
 function paintSettings() {
-  const locked = Boolean(controller) || verifyingFiles;
-  for (const radio of connections) {
-    radio.checked = radio.value === connection;
-    radio.disabled = locked;
+  const locked = Boolean(active || validatingFile);
+  for (const option of engineOptions) {
+    option.checked = option.value === engine;
+    option.disabled = locked;
   }
-  $('community-settings').hidden = connection !== 'community';
-  $('local-settings').hidden = connection !== 'local';
-  paintNetwork();
-  for (const role of modelRoles) {
-    const file = pendingFiles[role];
-    const label = $(`${role}-file-name`);
-    label.textContent = file ? file.name : role === 'driver' ? 'No file selected' : 'Uses the driver if left empty';
-    label.title = file?.name ?? '';
-    $(`${role}-file`).disabled = locked;
-  }
-  $('reuse-driver').hidden = !pendingFiles.reviewer;
-  $('clear-models').hidden = !files.driver && !pendingFiles.driver && !pendingFiles.reviewer;
-  for (const id of ['reuse-driver', 'clear-models', 'apply-models']) $(id).disabled = locked;
-  $('apply-label').textContent = verifyingFiles ? 'Checking files…' : 'Use models';
-  $('settings-busy').hidden = !controller;
+  $('settings-busy').hidden = !active;
+  $('community-settings').hidden = engine !== 'community';
+  $('local-settings').hidden = engine !== 'local';
+  $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
+    ? 'Availability hasn’t been checked yet.' : models.length
+      ? `${models.length} ${models.length === 1 ? 'text model was' : 'text models were'} online at the last check.`
+      : 'No eligible text models were online at the last check.');
+  $('online-models').replaceChildren(...(networkError ? [] : (models ?? []).slice(0, 5).map(({ id }) => el('li', '', id))));
+  $('online-models').hidden = Boolean(networkError || !models?.length || statusController);
+  $('check-network').disabled = Boolean(active || statusController || retryAt > Date.now());
+  $('reset-permission').hidden = !communityAllowed;
+  $('reset-permission').disabled = Boolean(active);
+  $('model-file').disabled = locked;
+  $('file-label').textContent = validatingFile ? 'Checking model file…' : localFile?.name ?? 'Choose a .gguf file';
+  $('clear-model').hidden = !localFile;
+  $('clear-model').disabled = locked;
+  $('clear-chats').disabled = Boolean(active || !chats.length);
 }
 
-for (const radio of connections) radio.addEventListener('change', () => {
-  connection = radio.value;
-  if (connection === 'local') statusController?.abort();
-  paintModels();
-});
-$('check-network').addEventListener('click', async () => {
-  if (statusController || controller || retryAt > Date.now()) return;
-  const lookup = new AbortController();
-  statusController = lookup;
-  networkError = '';
-  paintNetwork();
+function nearEnd() { return scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 110; }
+function scrollToEnd() { scroll.scrollTop = scroll.scrollHeight; $('scroll-latest').hidden = true; }
+function syncScroll() { $('scroll-latest').hidden = !current || nearEnd(); }
+
+function phaseText(job) {
+  if (job?.message.deep) return 'Thinking it through…';
+  switch (job?.phase) {
+    case 'finding': return 'Finding an online model…';
+    case 'waiting': {
+      const position = job.queue?.position;
+      // The ETA is a provider estimate, not a promise; only show it while queued.
+      const seconds = position && job.queue?.seconds;
+      const eta = seconds && (seconds < 60 ? `about ${seconds}s` : `about ${Math.ceil(seconds / 60)} min`);
+      return position ? `In the community queue${eta ? ` · ${eta}` : ''}` : 'Waiting for a community model…';
+    }
+    case 'loading': return 'Loading your local model…';
+    case 'generating': return 'Writing a reply…';
+    default: return 'Getting ready…';
+  }
+}
+
+async function copy(text, control) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const temporary = el('textarea', 'sr-only');
+    temporary.value = text;
+    temporary.readOnly = true;
+    document.body.append(temporary);
+    temporary.select();
+    let done = false;
+    try { done = document.execCommand('copy'); } catch { /* permission unavailable */ }
+    temporary.remove();
+    control?.focus({ preventScroll: true });
+    if (!done) { toast('Clipboard unavailable. Select and copy the text instead.'); return; }
+  }
+  toast('Copied to clipboard');
+}
+
+function renderMarkdown(body, text, withControls) {
+  body.innerHTML = format(text);
+  if (!withControls) return;
+  for (const code of body.querySelectorAll('pre > code')) {
+    const pre = code.parentElement;
+    const language = [...code.classList].find((name) => name.startsWith('language-'))?.slice(9) || 'Code';
+    const frame = el('div', 'code-frame');
+    const bar = el('div', 'code-tools');
+    const control = button('', 'Copy code', '', () => copy(code.textContent, control));
+    bar.append(el('span', '', language), control);
+    pre.replaceWith(frame);
+    frame.append(bar, pre);
+  }
+}
+
+function messageNode(message, last) {
+  const user = message.role === 'user';
+  const row = el('article', `message message-${user ? 'user' : 'assistant'}`);
+  row.setAttribute('aria-label', user ? 'Your message' : 'Frenemy’s reply');
+  row.dataset.status = message.status ?? 'sent';
+  if (user) { row.append(el('p', 'user-bubble', message.text)); return row; }
+  const avatar = el('span', 'assistant-icon');
+  avatar.append(icon('logo'));
+  const content = el('div', 'assistant-content');
+  const body = el('div', 'answer-body');
+  row.append(avatar, content);
+  content.append(el('p', 'assistant-name', 'Frenemy'), body);
+  body.hidden = !message.text;
+  if (message.text) renderMarkdown(body, message.text, message.status !== 'pending');
+  if (message.status === 'pending') {
+    const waiting = el('div', 'thinking');
+    const dots = el('span', 'thinking-dots');
+    dots.setAttribute('aria-hidden', 'true');
+    dots.append(el('i'), el('i'), el('i'));
+    const label = el('span', '', phaseText(active));
+    waiting.append(dots, label);
+    waiting.hidden = !body.hidden;
+    content.append(waiting);
+    if (active?.message === message) pendingNodes = { body, waiting, label };
+    return row;
+  }
+  const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'This reply reached the model’s output limit.' : '');
+  if (note) {
+    const info = el('p', 'answer-note', note);
+    if (message.status === 'error') info.dataset.tone = 'error';
+    else if (message.warning) info.dataset.tone = 'warning';
+    content.append(info);
+  }
+  const actions = el('div', 'message-actions');
+  if (message.text) {
+    const control = button('message-action', 'Copy', 'copy', () => copy(message.text, control));
+    control.setAttribute('aria-label', 'Copy reply');
+    actions.append(control);
+  }
+  if (last && message.engine === engine) {
+    const retry = button('message-action', 'Try again', 'retry', () => tryReply('retry'));
+    retry.dataset.retry = '';
+    retry.disabled = blocked();
+    actions.append(retry);
+  }
+  if (message.model) {
+    const source = el('span', 'message-meta', message.model);
+    source.title = `${message.engine === 'community' ? 'Community model' : 'Local model'}: ${message.model}`;
+    actions.append(source);
+  }
+  if (actions.childNodes.length) content.append(actions);
+  return row;
+}
+
+function paintThread(follow = false) {
+  pendingNodes = undefined;
+  thread.replaceChildren(...(current ? [el('h1', 'sr-only', current.title),
+    ...current.messages.map((message, i, list) => messageNode(message, i === list.length - 1))] : []));
+  if (follow) scrollToEnd();
+  else syncScroll();
+}
+
+function refreshStream(job) {
+  if (active !== job || current !== job.chat || streamFrame) return;
+  streamFrame = requestAnimationFrame(() => {
+    streamFrame = 0;
+    if (active !== job || current !== job.chat || !pendingNodes) return;
+    const follow = nearEnd();
+    const { body, waiting, label } = pendingNodes;
+    label.textContent = phaseText(job);
+    const text = job.message.text;
+    body.hidden = !text;
+    waiting.hidden = Boolean(text);
+    if (text) renderMarkdown(body, text, false);
+    if (follow) scrollToEnd();
+    else syncScroll();
+  });
+}
+
+function paintView(follow = false) {
+  const writingInChat = Boolean(current);
+  if (writingInChat) $('main').dataset.thread = '';
+  else delete $('main').dataset.thread;
+  $('welcome').hidden = writingInChat;
+  thread.hidden = !writingInChat;
+  $('chat-dock').hidden = !writingInChat;
+  const mount = $(writingInChat ? 'chat-dock' : 'welcome-composer');
+  if ($('composer').parentElement !== mount) mount.append($('composer'));
+  $('chat-title').textContent = current?.title ?? 'New conversation';
+  $('chat-title').title = current?.title ?? '';
+  $('chat-options').hidden = !writingInChat;
+  $('chat-options').disabled = Boolean(active && active.chat === current);
+  prompt.placeholder = writingInChat ? 'Ask a follow-up…' : 'Ask Frenemy anything…';
+  paintThread(follow);
+  sizePrompt();
+  paintComposer();
+}
+
+function urlForChat(chat) {
+  const next = chat ? `#chat/${encodeURIComponent(chat.id)}` : '';
+  if (location.hash === next) return;
+  try { window.history.pushState(null, '', `${location.pathname}${location.search}${next}`); } catch { /* embedded history can be restricted */ }
+}
+
+function openChat(chat, { fromUrl = false, focus = true } = {}) {
+  if (current !== chat) {
+    const key = current?.id ?? '';
+    if (prompt.value) drafts.set(key, prompt.value);
+    else drafts.delete(key);
+    current = chat;
+    prompt.value = drafts.get(current?.id ?? '') ?? '';
+  }
+  if (!fromUrl) urlForChat(chat);
+  if (mobileSidebar) setSidebar(false);
+  paintView(Boolean(current));
+  if (!current) scroll.scrollTop = 0;
+  paintHistory();
+  if (focus) {
+    if (mobile.matches) $('main').focus({ preventScroll: true });
+    else prompt.focus({ preventScroll: true });
+  }
+}
+
+function chatFromUrl() {
+  const prefix = '#chat/';
+  if (!location.hash.startsWith(prefix)) return undefined;
+  try { return chats.find(({ id }) => id === decodeURIComponent(location.hash.slice(prefix.length))); }
+  catch { return undefined; }
+}
+
+function startNewChat() {
+  drafts.delete('');
+  if (!current) prompt.value = '';
+  openChat(undefined);
+}
+
+function tryReply(action) {
+  if (blocked() || $('consent-dialog').open) return;
+  const retry = action === 'retry';
+  let text;
+  if (retry) {
+    if (current?.messages.at(-1)?.engine !== engine) return;
+  } else {
+    try { text = cleanPrompt(prompt.value); } catch { return; }
+  }
+  if (engine === 'community' && !communityAllowed) {
+    consentAction = action;
+    $('consent-dialog').showModal();
+    return;
+  }
+  let reply;
+  const deep = engine === 'community' && deeper;
+  if (retry) {
+    reply = current.messages.at(-1);
+    Object.assign(reply, { deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined });
+  } else {
+    drafts.delete(current?.id ?? '');
+    if (!current) {
+      // Keep the browser history bounded even if storage is disabled.
+      current = createChat(text);
+      chats = [current, ...orderedChats(chats).slice(0, 31)];
+      urlForChat(current);
+    }
+    reply = newTurn(current, text, engine, deep);
+    prompt.value = '';
+  }
+  generate(current, reply);
+}
+
+async function generate(chat, message) {
+  statusController?.abort();
+  const controller = new AbortController();
+  const job = { chat, message, controller };
+  active = job;
+  const onPhase = (phase, queue) => { job.phase = phase; job.queue = queue; refreshStream(job); };
+  const runtime = message.engine === 'community' ? communityEngine({ onPhase, onLimit: showCooldown, onModels(list) {
+    models = list;
+    networkError = '';
+    if ($('settings-dialog').open) paintSettings();
+  } }) : browserEngine(localFile, onPhase);
+  chat.updatedAt = Date.now();
+  save();
+  paintView(true);
+  paintHistory();
+  paintSettings();
+  if (!mobile.matches) prompt.focus({ preventScroll: true });
+  $('announcer').textContent = 'Frenemy is preparing a reply.';
   try {
-    showOnlineModels(await getOnlineModels({ signal: lookup.signal }));
+    const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
+      signal: controller.signal, deep: message.deep, onText(text) { message.text = text; refreshStream(job); } });
+    controller.signal.throwIfAborted();
+    Object.assign(message, answer, { status: 'complete', warning: answer.warning?.slice(0, 600) });
+    $('announcer').textContent = 'Reply ready.';
   } catch (error) {
-    if (!lookup.signal.aborted) {
-      networkError = error.message;
-      if (error.retryAfter) coolDown(error.retryAfter);
+    if (controller.signal.aborted) {
+      message.status = 'stopped';
+      message.text = message.text.trim();
+      $('announcer').textContent = 'Reply stopped.';
+    } else {
+      // Provider stream errors can invalidate a partly delivered answer.
+      message.status = 'error';
+      message.text = '';
+      message.warning = (error instanceof Error ? error.message : 'Could not complete the reply. Try again.').slice(0, 600);
+      $('announcer').textContent = 'Could not complete the reply.';
     }
   } finally {
-    statusController = undefined;
-    paintNetwork();
+    runtime.dispose?.();
+    if (streamFrame) cancelAnimationFrame(streamFrame);
+    streamFrame = 0;
+    const hadFocus = document.activeElement === $('stop-button');
+    active = undefined;
+    save();
+    paintView(current === chat && nearEnd());
+    paintHistory();
+    paintSettings();
+    if (hadFocus) prompt.focus({ preventScroll: true });
   }
+}
+
+function openSearch() {
+  if ($('search-dialog').open) return;
+  $('search-input').value = '';
+  paintSearch();
+  $('search-dialog').showModal();
+  $('search-input').focus();
+}
+
+function confirmRemove(target) {
+  removeTarget = target;
+  const all = target === 'all';
+  $('remove-title').textContent = all ? 'Clear all chats?' : 'Delete chat?';
+  $('remove-description').textContent = all ? 'This permanently removes all chats saved in this browser.' : 'This permanently removes this chat from this browser.';
+  $('confirm-remove').textContent = all ? 'Clear chats' : 'Delete chat';
+  $('remove-dialog').showModal();
+}
+
+$('brand').addEventListener('click', startNewChat);
+$('new-chat').addEventListener('click', startNewChat);
+$('open-search').addEventListener('click', openSearch);
+$('search-input').addEventListener('input', paintSearch);
+$('search-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.isComposing) $('search-results').querySelector('button')?.click();
+});
+$('sidebar-toggle').addEventListener('click', () => setSidebar(!(mobile.matches ? mobileSidebar : desktopSidebar), true));
+for (const id of ['sidebar-backdrop', 'close-sidebar']) $(id).addEventListener('click', () => setSidebar(false, true));
+mobile.addEventListener('change', () => { mobileSidebar = false; paintSidebar(); sizePrompt(); });
+window.addEventListener('hashchange', () => openChat(chatFromUrl(), { fromUrl: true, focus: false }));
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented) return;
+  if (event.key === 'Escape' && mobileSidebar && !document.querySelector('dialog[open]')) setSidebar(false, true);
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    openSearch();
+  }
+});
+if (/Mac|iPhone|iPad/.test(navigator.platform)) $('search-shortcut').textContent = '⌘ K';
+
+for (const control of document.querySelectorAll('[data-settings]')) control.addEventListener('click', () => {
+  paintSettings();
+  $('settings-dialog').showModal();
+});
+for (const control of document.querySelectorAll('[data-close]')) control.addEventListener('click', () => control.closest('dialog').close());
+$('open-privacy').addEventListener('click', () => $('privacy-dialog').showModal());
+for (const control of document.querySelectorAll('[data-prompt]')) control.addEventListener('click', () => {
+  prompt.value = templates[control.dataset.prompt];
+  sizePrompt();
+  paintComposer();
+  prompt.focus();
+});
+$('deep-button').addEventListener('click', () => { deeper = !deeper; paintComposer(); });
+prompt.addEventListener('input', () => { sizePrompt(); paintComposer(); });
+prompt.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  tryReply('new');
+});
+$('send-button').addEventListener('click', () => tryReply('new'));
+$('stop-button').addEventListener('click', () => active?.controller.abort());
+$('open-busy').addEventListener('click', () => { if (active) openChat(active.chat); });
+$('accept-community').addEventListener('click', () => {
+  communityAllowed = true;
+  $('consent-dialog').close();
+  tryReply(consentAction);
 });
 $('reset-permission').addEventListener('click', () => {
   communityAllowed = false;
-  paintNetwork();
-  toast('You’ll be asked again before a community run.');
+  paintSettings();
+  $('check-network').focus();
+  toast('Frenemy will ask next time you send a community message.');
 });
-$('allow-community').addEventListener('click', () => {
-  communityAllowed = true;
-  communityDialog.close();
-  runRelay();
-});
+$('scroll-latest').addEventListener('click', () => { scrollToEnd(); prompt.focus({ preventScroll: true }); });
+scroll.addEventListener('scroll', syncScroll, { passive: true });
 
-for (const button of document.querySelectorAll('[data-guide]')) button.addEventListener('click', () => $('guide-dialog').showModal());
-for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
-for (const role of modelRoles) {
-  $(`${role}-file`).addEventListener('change', (event) => {
-    const input = event.target;
-    if (!input.files[0]) return;
-    pendingFiles[role] = input.files[0];
-    input.value = '';
-    modelError();
-    paintSettings();
-  });
-}
-$('reuse-driver').addEventListener('click', () => {
-  pendingFiles.reviewer = null;
-  paintSettings();
-  $('reviewer-file').focus();
-  modelError();
+for (const option of engineOptions) option.addEventListener('change', () => {
+  if (active || validatingFile) return;
+  engine = option.value;
+  if (engine === 'local') statusController?.abort();
+  paintConnection();
+  paintThread();
 });
-$('clear-models').addEventListener('click', () => {
-  files = { driver: null, reviewer: null };
-  pendingFiles = { ...files };
-  modelError();
-  paintModels();
-  $('driver-file').focus();
-  toast('Model selections cleared. Downloaded files were not deleted.');
-});
-modelForm.addEventListener('submit', (event) => event.preventDefault());
-$('apply-models').addEventListener('click', async () => {
-  if (controller || verifyingFiles) return;
-  const chosen = { ...pendingFiles };
-  verifyingFiles = true;
-  modelError();
+$('check-network').addEventListener('click', async () => {
+  if (active || statusController || retryAt > Date.now()) return;
+  const check = new AbortController();
+  statusController = check;
+  networkError = '';
   paintSettings();
-  let role = 'driver';
-  let invalid;
-  try {
-    await validateModel(chosen.driver);
-    if (chosen.reviewer) {
-      role = 'reviewer';
-      await validateModel(chosen.reviewer);
-    }
-    if (currentView !== 'settings') return;
-    files = chosen;
-    paintModels();
-    location.hash = 'workspace';
-    toast('Models are ready for this tab.');
-  } catch (error) {
-    if (currentView === 'settings') {
-      invalid = role;
-      const message = error instanceof Error ? error.message : 'Could not read that file.';
-      modelError(`${role === 'driver' ? 'Driver' : 'Reviewer'} model: ${message}`, role);
+  try { models = await getOnlineModels({ signal: check.signal }); }
+  catch (error) {
+    if (!check.signal.aborted) {
+      networkError = error.message;
+      if (error.retryAfter) showCooldown(error.retryAfter);
     }
   } finally {
-    verifyingFiles = false;
+    statusController = undefined;
     paintSettings();
-    if (invalid) $(`${invalid}-file`).focus();
   }
 });
-
-// No native form submission: the same actions work in iframe previews without allow-forms.
-form.addEventListener('submit', (event) => event.preventDefault());
-$('run-button').addEventListener('click', runRelay);
-async function runRelay() {
-  if (controller || currentView !== 'workspace') return;
-  const community = connection === 'community';
-  if (community && retryAt > Date.now()) return;
-  if (!community && !files.driver) {
-    location.hash = 'settings';
-    return;
-  }
-  let run;
-  try {
-    // A timestamp and tab-local sequence also work in non-secure preview contexts.
-    run = createRun({
-      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${++runSequence}`,
-      prompt: prompt.value, mode: mode(), engine: connection,
-      names: community ? { driver: 'Community model', reviewer: 'Community model' }
-        : { driver: modelName(files.driver), reviewer: modelName(files.reviewer ?? files.driver) },
-    });
-  } catch (error) {
-    setPromptError(error.message);
-    prompt.focus();
-    return;
-  }
-  if (community && !communityAllowed) {
-    communityDialog.showModal();
-    return;
-  }
-  statusController?.abort();
-  controller = new AbortController();
-  visibleRun = run;
-  livePhase = selection = undefined;
-  const onPhase = (key, phase) => { livePhase = { key, phase }; paintTimeline(); };
-  const runtime = community
-    ? communityEngine({ onPhase, onModels: showOnlineModels, onLimit: coolDown })
-    : browserEngine(files, onPhase);
-  const buttonHadFocus = document.activeElement === $('run-button');
-  setBusy(true);
-  if (buttonHadFocus) $('stop-button').focus({ preventScroll: true });
-  paintHistory();
-  announce(community ? 'Community relay started.' : 'Local relay started.');
-  try {
-    await executeRelay(run, {
-      generate: runtime.generate,
-      signal: controller.signal,
-      onUpdate: paintRun,
-    });
-    history = addToHistory(history, run);
-    const saved = saveHistory(storage, history);
-    announce(`Relay ${STATE_LABELS[run.state].toLowerCase()}. See relay output.`);
-    if (!saved) toast('Browser storage is unavailable. History will only last in this tab.');
+$('model-file').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file || active || validatingFile) return;
+  validatingFile = true;
+  paintComposer();
+  $('model-error').hidden = true;
+  paintSettings();
+  try { await validateModel(file); localFile = file; }
+  catch (error) {
+    $('model-error').textContent = error.message;
+    $('model-error').hidden = false;
   } finally {
-    runtime.dispose?.();
-    controller = undefined;
-    const restoreFocus = document.activeElement === $('stop-button');
-    setBusy(false);
-    if (restoreFocus) $('run-button').focus({ preventScroll: true });
-    paintHistory();
-    if (currentView === 'workspace' && run.state !== 'stopped') $('result').scrollIntoView({ block: 'nearest' });
+    validatingFile = false;
+    paintConnection();
   }
-}
+});
+$('clear-model').addEventListener('click', () => {
+  localFile = undefined;
+  $('model-error').hidden = true;
+  paintConnection();
+  $('model-file').focus();
+});
 
-$('stop-button').addEventListener('click', () => controller?.abort());
-form.addEventListener('keydown', (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.isComposing) {
-    event.preventDefault();
-    runRelay();
-  }
+$('chat-options').addEventListener('click', () => {
+  if (!current || active?.chat === current) return;
+  $('rename-input').value = current.title;
+  $('options-dialog').showModal();
+  $('rename-input').select();
 });
-for (const radio of modes) radio.addEventListener('change', () => { visibleRun = undefined; selection = undefined; paintRun(); });
-prompt.addEventListener('input', paintPrompt);
-
-$('result-tabs').addEventListener('click', (event) => {
-  if (event.target.dataset.key && visibleRun) { selection = event.target.dataset.key; paintResult(); }
-});
-$('result-tabs').addEventListener('keydown', (event) => {
-  if (!event.target.matches('[role="tab"]') || !visibleRun) return;
-  const keys = PLANS[visibleRun.mode].map((stage) => stage.key);
-  const index = keys.indexOf(event.target.dataset.key);
-  const next = { ArrowLeft: (index - 1 + keys.length) % keys.length, ArrowRight: (index + 1) % keys.length, Home: 0, End: keys.length - 1 }[event.key];
-  if (next === undefined) return;
-  event.preventDefault();
-  selection = keys[next];
-  paintResult();
-  $(`tab-${selection}`).focus({ preventScroll: true });
-});
-$('copy-result').addEventListener('click', async () => {
-  if (!visibleRun) return;
-  const key = resultStep(visibleRun, selection);
-  const text = visibleRun.steps.find((step) => step.key === key)?.text;
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Response copied.');
-  } catch {
-    const input = element('textarea', 'sr-only');
-    input.value = text;
-    document.body.append(input);
-    input.select();
-    let copied = false;
-    try { copied = document.execCommand('copy'); } catch { /* not supported */ }
-    input.remove();
-    $('copy-result').focus({ preventScroll: true });
-    toast(copied ? 'Response copied.' : 'Clipboard unavailable. Select the response to copy it manually.');
-  }
-});
-$('clear-history').addEventListener('click', () => $('clear-dialog').showModal());
-$('confirm-clear').addEventListener('click', () => {
-  $('clear-dialog').close();
-  history = [];
-  const saved = saveHistory(storage, history);
-  if (visibleRun?.prompt === prompt.value.trim()) { prompt.value = ''; paintPrompt(); }
-  visibleRun = undefined;
-  selection = undefined;
-  paintRun();
+$('save-title').addEventListener('click', () => {
+  const title = $('rename-input').value.trim();
+  if (!current || !title) { $('rename-input').focus(); return; }
+  current.title = title;
+  save();
+  paintView();
   paintHistory();
-  $('history-title').focus({ preventScroll: true });
-  toast(saved ? 'Run history cleared.' : 'History cleared from this tab. Browser storage was unavailable.');
+  $('options-dialog').close();
 });
-window.addEventListener('storage', (event) => {
-  if (event.storageArea !== storage || (event.key !== HISTORY_KEY && event.key !== null)) return;
-  history = readHistory(storage);
-  if (currentView === 'history') paintHistory();
+$('rename-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.isComposing) $('save-title').click();
 });
-window.addEventListener('hashchange', () => {
-  if (!location.hash || Object.hasOwn(views, location.hash.slice(1))) route(true);
+$('delete-chat').addEventListener('click', () => { if (current && active?.chat !== current) confirmRemove(current); });
+$('clear-chats').addEventListener('click', () => { if (!active && chats.length) confirmRemove('all'); });
+$('confirm-remove').addEventListener('click', () => {
+  const all = removeTarget === 'all';
+  if (!removeTarget || (all ? active : active?.chat === removeTarget)) return;
+  $('remove-dialog').close();
+  if (all) {
+    $('settings-dialog').close();
+    chats = [];
+    drafts.clear();
+    prompt.value = '';
+  } else {
+    $('options-dialog').close();
+    chats = chats.filter((chat) => chat !== removeTarget);
+    drafts.delete(removeTarget.id);
+    prompt.value = '';
+  }
+  removeTarget = undefined;
+  save();
+  openChat(undefined);
+  paintSettings();
+  toast(all ? 'Chat history cleared' : 'Chat deleted');
 });
 
-if (/Mac|iPhone|iPad/.test(navigator.platform)) $('modifier').textContent = '⌘';
-paintPrompt();
-paintModels();
-paintRun();
-route();
+paintSidebar();
+openChat(chatFromUrl(), { fromUrl: true, focus: false });
+paintConnection();

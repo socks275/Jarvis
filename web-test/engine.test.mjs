@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { browserEngine, validateModel } from '../web/engine.mjs';
-import { PLANS } from '../web/relay.mjs';
 
 const fixture = (name = 'small-model.gguf', magic = 'GGUF') => new File([magic, new Uint8Array(20)], name);
 
-test('the local model picker accepts only small, single-file GGUFs with a valid header', async () => {
+test('the local picker accepts only small, single-file GGUFs with a valid header', async () => {
   await validateModel(fixture());
   await assert.rejects(validateModel(), /Choose a .gguf/);
   await assert.rejects(validateModel(fixture('weights.bin')), /Choose a .gguf/);
@@ -14,7 +13,7 @@ test('the local model picker accepts only small, single-file GGUFs with a valid 
   await assert.rejects(validateModel({ name: 'huge.gguf', size: 2e9 }), /smaller than 1.2 GB/);
 });
 
-test('the worker receives the right role file and is terminated on stop', async () => {
+test('the worker receives the on-device conversation, streams output and is terminated on stop', async () => {
   const previous = globalThis.Worker;
   let worker;
   globalThis.Worker = class extends EventTarget {
@@ -23,21 +22,24 @@ test('the worker receives the right role file and is terminated on stop', async 
     terminate() { this.terminated = true; }
   };
   const controller = new AbortController();
-  const driver = fixture('driver.gguf');
-  const reviewer = fixture('reviewer.gguf');
-  const phases = [];
-  const engine = browserEngine({ driver, reviewer }, (...phase) => phases.push(phase));
+  const file = fixture('local-model.gguf');
+  const phases = [], snapshots = [];
+  const engine = browserEngine(file, (phase) => phases.push(phase));
+  const messages = [{ role: 'system', content: 'Be helpful' }, { role: 'user', content: 'Test prompt' }];
   try {
-    const request = (stage) => engine.generate({ stage, input: 'Test prompt', signal: controller.signal });
-    const first = request(PLANS.review[0]);
-    assert.equal(worker.payload.file, driver);
-    const respond = (message) => worker.dispatchEvent(new MessageEvent('message', { data: { id: worker.payload.id, ...message } }));
+    const request = () => engine.generate({ messages, signal: controller.signal, onText: (text) => snapshots.push(text) });
+    const first = request();
+    assert.equal(worker.payload.file, file);
+    assert.deepEqual(worker.payload.messages, messages);
+    const respond = (data) => worker.dispatchEvent(new MessageEvent('message', { data }));
     respond({ type: 'phase', phase: 'loading' });
-    respond({ type: 'result', text: 'Response' });
-    assert.equal(await first, 'Response');
-    assert.deepEqual(phases, [['draft', 'loading']]);
-    const second = request(PLANS.review[1]);
-    assert.equal(worker.payload.file, reviewer);
+    respond({ type: 'text', text: 'Re' });
+    respond({ type: 'result', text: 'Response', limited: false });
+    assert.deepEqual(await first, { text: 'Response', model: 'local-model', limited: false });
+    assert.deepEqual(phases, ['loading']);
+    assert.deepEqual(snapshots, ['Re']);
+    assert.equal(worker.terminated, true);
+    const second = request();
     controller.abort();
     await assert.rejects(second, { name: 'AbortError' });
     assert.equal(worker.terminated, true);

@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { communityEngine, getOnlineModels, planCommunityRequest } from '../web/community.mjs';
-import { createRun, executeRelay, PLANS, resultStep } from '../web/relay.mjs';
 
 const api = 'https://oai.aihorde.net/v1';
 const signal = () => new AbortController().signal;
+const messages = [{ role: 'system', content: 'Be helpful.' }, { role: 'user', content: 'How do rainbows form?' }];
 const card = (id, { workers = 2, queued = 0, context = 8192, max = 1024 } = {}) => ({
   id, context_length: context, top_provider: { max_completion_tokens: max }, x_horde: { workers, queued },
   architecture: { input_modalities: ['text'], output_modalities: ['text'] },
 });
 const json = (data, init) => Response.json(data, init);
 const list = (...cards) => json({ data: cards });
-const completion = (model, text, finish_reason = 'stop') => json({ model, choices: [{ message: { content: text }, finish_reason }] });
+const completion = (model, text) => json({ model, choices: [{ message: { content: text }, finish_reason: 'stop' }] });
 const refusal = (code, status, headers) => json({ error: { code } }, { status, headers });
+
+function stream(events) {
+  const bytes = new TextEncoder().encode(events.join(''));
+  let index = 0;
+  return new Response(new ReadableStream({ pull(controller) {
+    if (index >= bytes.length) controller.close();
+    else { controller.enqueue(bytes.slice(index, index + 7)); index += 7; }
+  } }), { headers: { 'content-type': 'text/event-stream; charset=utf-8' } });
+}
+const event = (value) => `data: ${JSON.stringify(value)}\r\n\r\n`;
 
 test('reads the official live model list without sending prompts or credentials', async () => {
   const models = await getOnlineModels({ fetchImpl: async (url, options) => {
@@ -29,70 +39,86 @@ test('reads the official live model list without sending prompts or credentials'
   assert.deepEqual(models.map(({ id }) => id), ['free', 'busy']);
 });
 
-test('offers up to five context-compatible models and stays within free output limits', async () => {
-  const models = await getOnlineModels({ fetchImpl: async () => list(
-    card('small-context', { context: 96 }),
-    ...Array.from({ length: 8 }, (_, index) => card(`model-${index}`)),
-  ) });
-  const request = planCommunityRequest(models, { stage: PLANS.review[0], input: 'Test message' });
+test('selects at most five compatible models, respects the free limit and prefers a second model for a check', async () => {
+  const models = await getOnlineModels({ fetchImpl: async () => list(card('tiny-context', { context: 96 }),
+    ...Array.from({ length: 8 }, (_, index) => card(`model-${index}`))) });
+  const request = planCommunityRequest(models, { messages, purpose: 'answer' });
   assert.equal(request.models.length, 5);
-  assert.ok(!request.models.includes('small-context'));
+  assert.ok(!request.models.includes('tiny-context'));
   assert.equal(request.max_tokens, 512);
-  assert.deepEqual(request.messages, [{ role: 'user', content: 'Test message' }]);
+  assert.equal(request.stream, true);
   assert.equal(request.horde.include_reasoning, false);
-  const lowLimit = planCommunityRequest([{ id: 'limited', context: 2048, tokens: 96 }], { stage: PLANS.quick[0], input: 'Small request' });
-  assert.equal(lowLimit.max_tokens, 96);
+  const review = planCommunityRequest(models, { messages, purpose: 'review', preferOtherThan: 'model-0' });
+  assert.ok(!review.models.includes('model-0'));
+  assert.equal(review.max_tokens, 352);
 });
 
-test('rediscovers models each step, prefers another reviewer and records the serving model', async () => {
-  const replies = [
-    ['driver', 'A draft.'], ['peer', 'Reviewer feedback.'], ['replacement', 'A final answer.', 'length'],
-  ];
-  const batches = [[card('driver'), card('peer')], [card('driver'), card('peer')], [card('replacement')]];
-  const bodies = [];
-  const fetchImpl = async (url, options) => {
-    if (url.endsWith('/models')) return list(...batches.shift());
+test('only complete older turns are removed when resizing conversation context', () => {
+  const history = [messages[0], { role: 'user', content: 'Old '.repeat(1100) },
+    { role: 'assistant', content: 'Old answer' }, ...messages.slice(1)];
+  const request = planCommunityRequest([{ id: 'medium', context: 780, tokens: 512 }], { messages: history, purpose: 'answer' });
+  assert.deepEqual(request.messages, messages);
+  const small = planCommunityRequest([{ id: 'low-limit', context: 500, tokens: 96 }], { messages, purpose: 'answer' });
+  assert.equal(small.max_tokens, 96);
+  assert.throws(() => planCommunityRequest([{ id: 'no-fit', context: 128, tokens: 96 }], { messages, purpose: 'answer' }), /cannot fit/);
+});
+
+test('sends chat roles anonymously, reports queue hints, decodes actual deltas and records the final model', async () => {
+  const phases = [], updates = [];
+  let posts = 0;
+  const { generate } = communityEngine({ onPhase: (...args) => phases.push(args), fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('worker/A'), card('worker/B'));
     assert.equal(url, `${api}/chat/completions`);
+    posts++;
     assert.equal(options.method, 'POST');
     assert.equal(options.credentials, 'omit');
-    assert.equal(options.headers['X-Title'], 'Frenemy Web');
     assert.equal(new Headers(options.headers).has('Authorization'), false);
-    bodies.push(JSON.parse(options.body));
-    return completion(...replies.shift());
-  };
-  const { generate } = communityEngine({ fetchImpl });
-  const run = createRun({ id: 'network', prompt: 'Explain caching.', mode: 'review', engine: 'community', names: { driver: 'Auto', reviewer: 'Auto' } });
-  await executeRelay(run, { generate, signal: signal() });
-  assert.equal(run.state, 'complete', run.error);
-  assert.deepEqual(bodies.map(({ models }) => models), [['driver', 'peer'], ['peer'], ['replacement']]);
-  assert.match(bodies[1].messages[0].content, /A draft\./);
-  assert.match(bodies[2].messages[0].content, /Reviewer feedback\./);
-  assert.deepEqual(run.steps.map(({ model }) => model), ['driver', 'peer', 'replacement']);
-  assert.equal(run.steps[2].limited, true);
+    assert.equal(options.headers['X-Title'], 'Frenemy Web');
+    assert.deepEqual(JSON.parse(options.body).messages, messages);
+    return stream([
+      ': horde queue_position=7 wait_time=42\r\n\r\n',
+      event({ model: 'worker/B', choices: [{ delta: { role: 'assistant' } }] }),
+      event({ choices: [{ delta: { reasoning_content: 'Not shown.' } }] }),
+      event({ choices: [{ delta: { content: 'Light bends ' } }] }),
+      event({ choices: [{ delta: { content: '🌈 in raindrops.' } }] }),
+      event({ model: 'worker/B', choices: [{ delta: {}, finish_reason: 'length' }] }),
+      'data: [DONE]\r\n\r\n',
+    ]);
+  } });
+  const result = await generate({ messages, purpose: 'answer', signal: signal(), onText: (text) => updates.push(text) });
+  assert.equal(posts, 1);
+  assert.deepEqual(phases, [['finding'], ['waiting'], ['waiting', { position: 7, seconds: 42 }]]);
+  assert.deepEqual(updates, ['Light bends ', 'Light bends 🌈 in raindrops.']);
+  assert.deepEqual(result, { text: 'Light bends 🌈 in raindrops.', model: 'worker/B', limited: true });
 });
 
-test('retains the draft as an answer when the provider rate-limits a later stage', async () => {
+test('a refused or broken stream does not report success or send a duplicate request', async () => {
+  for (const trailer of [[], [event({ error: { code: 'ChatStreamDiverged' } }), 'data: [DONE]\n\n']]) {
+    let posts = 0;
+    const { generate } = communityEngine({ fetchImpl: async (url) => {
+      if (url.endsWith('/models')) return list(card('worker/A'));
+      posts++;
+      return stream([event({ choices: [{ delta: { content: 'First words' } }] }), ...trailer]);
+    } });
+    await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /interrupted/);
+    assert.equal(posts, 1);
+  }
+});
+
+test('honors Retry-After without retrying a failed generation', async () => {
   let requests = 0;
   const pauses = [];
-  const { generate } = communityEngine({
-    fetchImpl: async (url) => {
-      if (url.endsWith('/models')) return list(card('only-model'));
-      requests += 1;
-      return requests === 1 ? completion('only-model', 'A useful draft.') : refusal('rate_limit_exceeded', 429, { 'Retry-After': '12' });
-    },
-    onLimit: (time) => pauses.push(time),
-  });
-  const run = createRun({ id: 'network', prompt: 'Explain caching.', mode: 'review', engine: 'community', names: { driver: 'Auto', reviewer: 'Auto' } });
-  await executeRelay(run, { generate, signal: signal() });
-  assert.equal(run.state, 'partial');
-  assert.equal(resultStep(run), 'draft');
-  assert.equal(run.steps[0].model, 'only-model');
-  assert.match(run.error, /Try again in about 12 seconds/);
-  assert.equal(requests, 2);
+  const { generate } = communityEngine({ fetchImpl: async (url) => {
+    if (url.endsWith('/models')) return list(card('only-model'));
+    requests++;
+    return refusal('rate_limit_exceeded', 429, { 'Retry-After': '12' });
+  }, onLimit: (time) => pauses.push(time) });
+  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /after the cooldown/);
+  assert.equal(requests, 1);
   assert.deepEqual(pauses, [12]);
 });
 
-test('reroutes a stale unqueued model once, and then only if the roster changed', async () => {
+test('reroutes a stale unqueued model once when the roster changed', async () => {
   for (const replacement of ['different', 'stale']) {
     let lookups = 0;
     const requests = [];
@@ -101,7 +127,7 @@ test('reroutes a stale unqueued model once, and then only if the roster changed'
       requests.push(JSON.parse(options.body).models);
       return requests.length === 1 ? refusal('UnknownChatModel', 404) : completion(replacement, 'A direct answer.');
     } });
-    const result = generate({ stage: PLANS.quick[0], input: 'Hello', signal: signal() });
+    const result = generate({ messages, signal: signal(), purpose: 'answer' });
     if (replacement === 'stale') {
       await assert.rejects(result);
       assert.deepEqual(requests, [['stale']]);
@@ -113,26 +139,15 @@ test('reroutes a stale unqueued model once, and then only if the roster changed'
   }
 });
 
-test('the client does not submit to an empty pool or duplicate uncertain requests', async () => {
-  let posts = 0;
+test('does not submit when no model is available', async () => {
   const { generate } = communityEngine({ fetchImpl: async (url) => {
-    if (url.endsWith('/models')) return list();
-    posts += 1;
+    assert.ok(url.endsWith('/models'));
+    return list();
   } });
-  await assert.rejects(generate({ stage: PLANS.quick[0], input: 'Hello', signal: signal() }), /No eligible text models/);
-  assert.equal(posts, 0);
-  for (const failure of [() => refusal('no_eligible_worker', 503, { 'x-should-retry': 'false' }), () => { throw new TypeError('network'); }]) {
-    const { generate: ask } = communityEngine({ fetchImpl: async (url) => {
-      if (url.endsWith('/models')) return list(card('served'));
-      posts += 1;
-      return failure();
-    } });
-    await assert.rejects(ask({ stage: PLANS.quick[0], input: 'Hello', signal: signal() }));
-  }
-  assert.equal(posts, 2);
+  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No text models/);
 });
 
-test('stopping a run aborts the browser’s community request', async () => {
+test('Stop aborts the request', async () => {
   let started;
   const waiting = new Promise((resolve) => { started = resolve; });
   const controller = new AbortController();
@@ -141,7 +156,7 @@ test('stopping a run aborts the browser’s community request', async () => {
     started();
     return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
   } });
-  const reply = generate({ stage: PLANS.quick[0], input: 'Hello', signal: controller.signal });
+  const reply = generate({ messages, signal: controller.signal, purpose: 'answer' });
   await waiting;
   controller.abort();
   await assert.rejects(reply, { name: 'AbortError' });

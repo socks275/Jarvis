@@ -3,303 +3,194 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Draft, review, and refine with online AI models. The free Frenemy relay desk works without a model download or personal API key.">
-  <meta name="theme-color" content="#111311">
+  <meta name="description" content="Frenemy is a free AI chat. Ask questions, write, and explore ideas without a sign-up, API key, or model download.">
+  <meta name="theme-color" content="#fcfbfe">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://oai.aihorde.net; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Frenemy — Relay Desk</title>
+  <title>Frenemy — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
 </head>
 <body>
   <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
-    <symbol id="i-relay" viewBox="0 0 24 24"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4 4-4-4 4-4"/></symbol>
-    <symbol id="i-workspace" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9h17m-12 0v10.5"/></symbol>
-    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 2.35 5.65M4 6v6h6m2-4v4l2.5 1.5"/></symbol>
-    <symbol id="i-model" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></symbol>
-    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M5 4v6m0 4v6m7-16v2m0 4v10m7-16v10m0 4v2M3 10h4v4H3zm7-4h4v4h-4zm7 8h4v4h-4z"/></symbol>
-    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1 .72-1.5 1-1.5 2m0 3h.01"/></symbol>
-    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6m0-6-9 9m8 0v5H5V6h5"/></symbol>
-    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
-    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2.5 12H7l3-7 4 14 3-7h4.5"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M10 3c.8 5 2.1 6.4 7 7-4.9.7-6.2 2-7 7-.7-5-2-6.3-7-7 5-.6 6.3-2 7-7Zm8-1.5c.4 2 1.2 2.8 3.2 3.2-2 .4-2.8 1.2-3.2 3.2-.4-2-1.2-2.8-3.2-3.2 2-.4 2.8-1.2 3.2-3.2Z"/><circle cx="18" cy="17" r="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.7" cy="10.7" r="5.7"/><path d="m15 15 4.5 4.5"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M9.5 5v14"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a7.75 7.75 0 0 1-8 7.5c-1.2 0-2.4-.25-3.4-.72L4 20l1.4-4.15A7.2 7.2 0 0 1 4 11.5 7.76 7.76 0 0 1 12 4a7.76 7.76 0 0 1 8 7.5Z"/><path d="M8.5 10.3h7m-7 2.8h4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4.5 7h15m-15 10h15"/><circle cx="9" cy="7" r="2.5" fill="var(--icon-bg, #fcfbfe)"/><circle cx="15" cy="17" r="2.5" fill="var(--icon-bg, #fcfbfe)"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.5" ry="8.5"/><path d="M3.5 12h17"/></symbol>
-    <symbol id="i-laptop" viewBox="0 0 24 24"><path d="M5 17V6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v11m-17 0h20v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1Z"/></symbol>
-    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.64 5.64l12.72 12.72m0-12.72L5.64 18.36"/></symbol>
-    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12c2.5-4 5.7-6 9.5-6 3.8 0 7 2 9.5 6-2.5 4-5.7 6-9.5 6-3.8 0-7-2-9.5-6Z"/><circle cx="12" cy="12" r="2.4"/></symbol>
-    <symbol id="i-compare" viewBox="0 0 24 24"><rect x="3" y="5" width="7" height="14" rx="1.5"/><rect x="14" y="5" width="7" height="14" rx="1.5"/></symbol>
-    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
-    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
-    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 21s7-3.5 7-10V6l-7-3-7 3v5c0 6.5 7 10 7 10Z"/><path d="m9 12 2 2 4-4"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="12" rx="1.5"/><path d="M2.5 19h19m-11-6 2-4 2 4"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6.5 5.5 5.5L9 17.5"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 5v10m-4-6 4-4 4 4M5 15v4h14v-4"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14m-6-6 6 6 6-6"/></symbol>
+    <symbol id="i-arrow-ne" viewBox="0 0 24 24"><path d="M6 18 18 6m-8 0h8v8"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3.5 13 9l5.5 2-5.5 2-2 5.5L9 13l-5.5-2L9 9l2-5.5Zm7 10.5 1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3Z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.5a6 6 0 0 0-4.2-1.8H4v13h3.8a6 6 0 0 1 4.2 1.8 6 6 0 0 1 4.2-1.8H20v-13h-3.8A6 6 0 0 0 12 6.5Zm0 0v13"/><path d="M7 9h2m6 0h2m-10 3h2m6 0h2"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="m6 15-1 4 4-1L19 8a1.4 1.4 0 0 0 0-2l-1-1a1.4 1.4 0 0 0-2 0L6 15Zm8.5-8.5 3 3M12 19h7"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.2 17v-2.5a5.5 5.5 0 1 1 5.6 0V17M9 17h6m-5 3h4"/><path d="m10.5 10.6 1.5 1.6 1.5-1.6"/></symbol>
+    <symbol id="i-plan" viewBox="0 0 24 24"><rect x="5" y="5.5" width="14" height="15" rx="2.4"/><path d="M9 3.5v4m6-4v4M5 10h14m-10 5 2 2 4-4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="9" rx="2.3"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5m-4 4v1.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5m0-8h.01"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5H7a2 2 0 0 0-2 2v8"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M19.5 12A7.5 7.5 0 1 1 17 6.4l2.5 2.1m0-5v5.6H14"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
-    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="1.5"/><path d="M15 5H6a1 1 0 0 0-1 1v9"/></symbol>
-    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4m-4 4 4-4 4 4M5 14v5h14v-5"/></symbol>
-    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m-4-4 4 4 4-4M5 15v5h14v-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12 4 4 9-9"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15m-12.5 0 1 13h8l1-13m-7 0v-3h4v3m-3.5 4v5m3-5v5"/></symbol>
   </svg>
 
-  <a class="skip-link" href="#main">Skip to content</a>
-  <div class="layout">
-    <aside class="rail">
-      <a class="brand" href="#workspace" aria-label="Frenemy workspace">
-        <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-relay"/></svg></span>
-        <span><span class="brand-name">frenemy<span>.</span></span><span class="brand-caption">WEB EDITION</span></span>
-      </a>
-      <nav class="rail-nav" aria-label="Main navigation">
-        <p class="nav-label">WORKSPACE</p>
-        <a class="nav-control" href="#workspace" data-view="workspace" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-workspace"/></svg><span>Relay desk</span></a>
-        <a class="nav-control" href="#history" data-view="history"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Run history</span></a>
-        <p class="nav-label nav-label-second">RESOURCES</p>
-        <a class="nav-control" href="#settings" data-view="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></a>
-        <button class="nav-control" type="button" data-guide><svg class="icon" aria-hidden="true"><use href="#i-help"/></svg><span>Guide</span></button>
-      </nav>
-      <div class="rail-foot">
-        <div class="rail-note">
-          <svg class="icon" aria-hidden="true"><use id="rail-runtime-icon" href="#i-globe"/></svg>
-          <div><strong id="rail-runtime-title">Community AI</strong><span id="rail-runtime-detail">No model downloads.</span></div>
+  <a class="skip-link" href="#main">Skip to chat</a>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Chat sidebar">
+      <div class="sidebar-inner">
+        <div class="sidebar-head">
+          <button type="button" id="brand" class="brand" aria-label="Frenemy home"><span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span><span>frenemy<span class="brand-period">.</span></span></button>
+          <button type="button" id="close-sidebar" class="icon-button sidebar-close" aria-label="Hide sidebar" title="Hide sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
         </div>
-        <a class="source-link" href="https://github.com/noblehacks/frenemy" target="_blank" rel="noreferrer">Open source · MIT <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+        <div class="sidebar-actions">
+          <button type="button" id="new-chat" class="new-chat"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> New chat</button>
+          <button type="button" id="open-search" class="sidebar-button"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Search chats</span><kbd id="search-shortcut">Ctrl K</kbd></button>
+        </div>
+        <div class="chat-history">
+          <h2 class="sidebar-label">Your chats</h2>
+          <div class="history-empty" id="history-empty">
+            <span class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg></span>
+            <p>No chats yet</p><small>Start a conversation and it’ll show up here.</small>
+          </div>
+          <nav aria-label="Saved chats"><ul class="history-list" id="chat-list"></ul></nav>
+        </div>
+        <div class="sidebar-footer">
+          <button type="button" class="sidebar-button" data-settings><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+          <button type="button" class="connection-card" data-settings>
+            <span class="connection-icon"><svg class="icon" aria-hidden="true"><use id="sidebar-engine-icon" href="#i-globe"/></svg></span>
+            <span class="connection-copy"><strong id="sidebar-engine">Community AI</strong><small id="sidebar-engine-note">Free · no key required</small></span>
+            <svg class="icon connection-arrow" aria-hidden="true"><use href="#i-right"/></svg>
+          </button>
+        </div>
       </div>
     </aside>
+    <button type="button" id="sidebar-backdrop" class="sidebar-backdrop" aria-label="Close sidebar" tabindex="-1" hidden></button>
 
-    <div class="body-shell">
+    <main id="main" class="main-shell" tabindex="-1">
       <header class="topbar">
-        <div class="breadcrumb"><span>Workspace</span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg><strong id="breadcrumb">Relay desk</strong></div>
-        <div class="local-badge"><svg class="icon" aria-hidden="true"><use id="header-runtime-icon" href="#i-globe"/></svg><span id="runtime-badge">Community AI</span></div>
-      </header>
-      <main id="main" class="content" tabindex="-1">
-        <div id="view-workspace">
-          <section class="hero" aria-labelledby="hero-title">
-            <div class="hero-copy">
-              <p class="eyebrow hero-kicker"><span class="hairline"></span> THE OPEN MODEL RELAY</p>
-              <h1 id="hero-title">Two minds.<br><span>Better answers.</span></h1>
-              <p id="hero-description">Draft, review, and refine with models that are online now. No model downloads, accounts, or personal keys.</p>
-            </div>
-            <svg class="hero-diagram" viewBox="0 0 420 226" aria-hidden="true">
-              <defs>
-                <pattern id="diagram-grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#8b9483" opacity=".22"/></pattern>
-                <linearGradient id="diagram-fade"><stop stop-color="white" stop-opacity="0"/><stop offset=".19" stop-color="white"/><stop offset=".88" stop-color="white"/><stop offset="1" stop-color="white" stop-opacity=".18"/></linearGradient>
-                <mask id="diagram-mask"><rect width="420" height="226" fill="url(#diagram-fade)"/></mask>
-              </defs>
-              <rect width="420" height="226" fill="url(#diagram-grid)" mask="url(#diagram-mask)"/>
-              <path d="M46 167h327M46 58h327M213 20v187" stroke="#363c33" stroke-dasharray="2 5"/>
-              <circle cx="213" cy="112" r="78" stroke="#343b2e" stroke-dasharray="3 7" fill="none"/>
-              <circle cx="213" cy="112" r="54" stroke="#2b3127" fill="none"/>
-              <path d="M159 92h104" stroke="#d7fa88" stroke-width="1.5" opacity=".8"/><path d="m258 87 5 5-5 5" fill="none" stroke="#d7fa88" stroke-width="1.5"/>
-              <path d="M266 132H162" stroke="#c8bcf9" stroke-width="1.5" stroke-dasharray="4 5" opacity=".8"/><path d="m167 127-5 5 5 5" fill="none" stroke="#c8bcf9" stroke-width="1.5"/>
-              <circle cx="206" cy="92" r="3" fill="#d7fa88"/><circle cx="223" cy="132" r="3" fill="#c8bcf9"/>
-              <rect x="60" y="71" width="94" height="82" rx="13" fill="#171b13" stroke="#4c5d36"/>
-              <rect x="86" y="82" width="42" height="42" rx="9" fill="#283318"/>
-              <use href="#i-spark" x="96" y="92" width="22" height="22" stroke="#d7fa88" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-              <text x="107" y="140" text-anchor="middle" fill="#d7fa88">01 / DRIVER</text>
-              <rect x="272" y="71" width="94" height="82" rx="13" fill="#1d1927" stroke="#504461"/>
-              <rect x="298" y="82" width="42" height="42" rx="9" fill="#332942"/>
-              <use href="#i-eye" x="308" y="92" width="22" height="22" stroke="#c8bcf9" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-              <text x="319" y="140" text-anchor="middle" fill="#c8bcf9">02 / REVIEWER</text>
-              <text x="213" y="203" text-anchor="middle" fill="#a7ad9f" class="diagram-label">DRAFT &nbsp; → &nbsp; REVIEW &nbsp; → &nbsp; REFINE</text>
-              <path d="M46 44v14h14m313-14v14h-14M46 181v-14h14m313 14v-14h-14" fill="none" stroke="#51584b"/>
-            </svg>
-          </section>
-
-          <div class="desk-grid">
-            <section class="panel compose" aria-labelledby="compose-title">
-              <div class="panel-heading">
-                <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-relay"/></svg></span>
-                <div><h2 id="compose-title">New relay</h2><p>Give your models something to work through together.</p></div>
-              </div>
-              <form id="relay-form">
-                <fieldset class="mode-options">
-                  <legend class="sr-only">Relay type</legend>
-                  <label class="mode-option"><input class="sr-only" type="radio" name="mode" value="review" checked><span><svg class="icon" aria-hidden="true"><use href="#i-relay"/></svg> Draft &amp; review</span></label>
-                  <label class="mode-option"><input class="sr-only" type="radio" name="mode" value="compare"><span><svg class="icon" aria-hidden="true"><use href="#i-compare"/></svg> Compare answers</span></label>
-                  <label class="mode-option"><input class="sr-only" type="radio" name="mode" value="quick"><span><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Quick answer</span></label>
-                </fieldset>
-                <div class="prompt-label"><label for="prompt">Your prompt</label><span id="prompt-count">0 / 1,600</span></div>
-                <textarea id="prompt" name="prompt" rows="4" maxlength="1600" placeholder="What are we working on? Describe a draft, a question, or a plan you want a second opinion on…" aria-describedby="prompt-message"></textarea>
-                <p class="field-message" id="prompt-message" hidden></p>
-                <div class="roles">
-                  <div class="role"><span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span><div><span class="role-label">DRIVER</span><strong id="driver-name" class="role-name">Auto-select</strong></div></div>
-                  <span class="role-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow"/></svg></span>
-                  <div class="role"><span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span><div><span class="role-label">REVIEWER</span><strong id="reviewer-name" class="role-name">Prefer a different model</strong></div></div>
-                  <a href="#settings" class="button text-button configure" id="configure-models">Connection settings</a>
-                </div>
-                <div class="form-footer">
-                  <a href="#settings" class="button primary" id="setup-button" hidden><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> Set up models</a>
-                  <button id="run-button" class="button primary" type="button"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span id="run-label">Run relay</span></button>
-                  <button id="stop-button" class="button border-button" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg> Stop relay</button>
-                  <span class="hotkey" id="run-hotkey"><kbd id="modifier">Ctrl</kbd> <kbd>Enter</kbd></span>
-                </div>
-                <p class="connection-note" id="relay-cooldown" role="status" hidden></p>
-              </form>
-            </section>
-
-            <aside class="panel snitch" aria-labelledby="snitch-title">
-              <div class="panel-heading">
-                <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-wave"/></svg></span>
-                <div><h2 id="snitch-title">Snitch</h2><p>Live relay activity</p></div>
-                <span class="run-state" id="run-state" data-state="idle"><span class="status-dot"></span><span id="run-state-text">Idle</span></span>
-              </div>
-              <div class="progress" id="progress" aria-hidden="true"></div>
-              <ol class="steps" id="steps" aria-label="Relay steps"></ol>
-              <div class="snitch-note">
-                <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
-                <div><strong id="note-title">Online models, no download</strong><p id="note-body">Community runs send your prompt to AI Horde’s volunteer workers. Don’t include private information.</p>
-                <a href="#settings" class="button text-button"><span id="note-action">Connection details</span> <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
-              </div>
-            </aside>
-          </div>
-
-          <section class="panel result" id="result" aria-labelledby="result-title" hidden>
-            <div class="panel-heading">
-              <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
-              <div><h2 id="result-title" tabindex="-1">Relay output</h2><p id="result-description"></p></div>
-              <button class="button border-button copy" id="copy-result" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Copy</button>
-            </div>
-            <div class="tabs" role="tablist" aria-label="Relay responses" id="result-tabs"></div>
-            <div class="response" role="tabpanel" tabindex="0" id="result-panel"></div>
-            <p class="connection-note" id="result-source" hidden></p>
-            <p class="result-error" id="result-error" hidden></p>
-          </section>
+        <div class="topbar-title">
+          <button type="button" id="sidebar-toggle" class="icon-button sidebar-toggle" aria-label="Show sidebar" aria-controls="sidebar" aria-expanded="true" title="Show sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+          <span class="topbar-section">Chat</span><span class="topbar-divider" aria-hidden="true"></span><span class="topbar-current" id="chat-title">New conversation</span>
         </div>
+        <div class="topbar-actions">
+          <button type="button" class="engine-pill" data-settings title="Connection settings"><svg class="icon" aria-hidden="true"><use id="top-engine-icon" href="#i-globe"/></svg><span id="top-engine">Community AI</span><svg class="icon engine-chevron" aria-hidden="true"><use href="#i-down"/></svg></button>
+          <button type="button" id="chat-options" class="icon-button" aria-label="Chat options" aria-haspopup="dialog" title="Chat options" hidden><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+        </div>
+      </header>
 
-        <section class="history" id="view-history" aria-labelledby="history-title" hidden>
-          <p class="eyebrow hero-kicker"><span class="hairline"></span> SAVED ON THIS DEVICE</p>
-          <div class="page-heading"><div><h1 id="history-title" tabindex="-1">Run history</h1><p>Revisit relays saved in this browser. Clearing browser data also erases this list.</p></div><button class="button border-button" id="clear-history" type="button" hidden>Clear history</button></div>
-          <div class="panel history-empty" id="history-empty">
-            <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></span><h2>No runs yet</h2><p>Your relays will show up here after you run them.</p><a class="button primary" href="#workspace">Start a relay <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      <div class="chat-scroll" id="chat-scroll">
+        <section class="welcome chat-width" id="welcome" aria-labelledby="welcome-title">
+          <div class="welcome-hero">
+            <img src="./hero-mark.svg" alt="" width="146" height="122" class="hero-mark" fetchpriority="high">
+            <h1 id="welcome-title">What’s on <span>your mind?</span></h1>
+            <p>Ask a question, explore an idea, or make something new.</p>
           </div>
-          <ul class="history-list" id="history-list"></ul>
-        </section>
-
-        <section id="view-settings" aria-labelledby="settings-title" hidden>
-          <p class="eyebrow hero-kicker"><span class="hairline"></span> AI CONNECTION</p>
-          <div class="page-heading">
-            <div><h1 id="settings-title" tabindex="-1">Settings</h1><p>Use the free community network, or keep your prompts on your device with local model files.</p></div>
-            <a href="#workspace" class="button border-button back-link"><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg> Back to relay desk</a>
-          </div>
-          <fieldset class="connection-options" id="connection-options">
-            <legend class="sr-only">AI connection</legend>
-            <label class="connection-option"><input type="radio" name="connection" value="community" class="sr-only" checked><span class="connection-card"><span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Use online models without downloads or a key.</small></span></span></label>
-            <label class="connection-option"><input type="radio" name="connection" value="local" class="sr-only"><span class="connection-card"><span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-laptop"/></svg></span><span><strong>Local model files</strong><small>Run GGUF models on this device for privacy.</small></span></span></label>
-          </fieldset>
-          <p class="connection-note settings-busy" id="settings-busy" role="status" hidden>A relay is running. Stop it or wait before changing the connection.</p>
-          <div class="settings-grid" id="community-settings">
-            <section class="panel model-settings" aria-labelledby="network-title">
-              <div class="panel-heading">
-                <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-wave"/></svg></span>
-                <div><h2 id="network-title">AI Horde network</h2><p>Free, volunteer-run text models.</p></div>
-              </div>
-              <p class="network-status" id="network-status" role="status">Availability hasn’t been checked yet. Every relay checks again before each step.</p>
-              <ul class="online-models" id="online-models" aria-label="Examples of online models"></ul>
-              <button type="button" class="button border-button" id="check-network"><svg class="icon" aria-hidden="true"><use href="#i-wave"/></svg> Check availability</button>
-            </section>
-            <section class="panel model-settings" aria-labelledby="network-info-title">
-              <div class="panel-heading">
-                <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span>
-                <div><h2 id="network-info-title">How community runs work</h2><p>No sign-up, payment, or personal API key.</p></div>
-              </div>
-              <dl class="guide-list">
-                <div><dt>Live routing</dt><dd>Frenemy picks several eligible models based on available workers and queue size. An available worker answers each step, and the reviewer uses a different model when possible.</dd></div>
-                <div><dt>Shared capacity</dt><dd>Availability and wait times change. Draft &amp; review uses up to three generation steps, while Quick answer uses one.</dd></div>
-                <div><dt>Prompt privacy</dt><dd>Community runs share your prompt and relevant intermediate replies with AI Horde and its volunteer workers. Use local files for sensitive work.</dd></div>
-              </dl>
-              <p class="model-tip"><a href="https://aihorde.net/terms" target="_blank" rel="noreferrer">AI Horde terms</a> · <a href="https://aihorde.net/privacy" target="_blank" rel="noreferrer">Privacy policy</a></p>
-              <button class="button text-button" type="button" id="reset-permission" hidden>Reset community permission</button>
-            </section>
-          </div>
-          <div class="settings-grid" id="local-settings" hidden>
-            <section class="panel model-settings" aria-labelledby="models-title">
-              <div class="panel-heading">
-                <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-model"/></svg></span>
-                <div><h2 id="models-title">Model files</h2><p id="model-format">Choose one instruction-tuned <code>.gguf</code> file per role.</p></div>
-              </div>
-              <form id="models-form">
-                <label class="file-choice">
-                  <input type="file" accept=".gguf" id="driver-file" class="sr-only" aria-label="Driver model file" aria-describedby="driver-file-name model-format">
-                  <span class="role-icon driver"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg></span>
-                  <span class="file-description"><strong>Driver model <small>Required</small></strong><span class="filename" id="driver-file-name">No file selected</span></span>
-                  <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
-                </label>
-                <label class="file-choice">
-                  <input type="file" accept=".gguf" id="reviewer-file" class="sr-only" aria-label="Reviewer model file (optional)" aria-describedby="reviewer-file-name model-format">
-                  <span class="role-icon reviewer"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></span>
-                  <span class="file-description"><strong>Reviewer model <small>Optional</small></strong><span class="filename" id="reviewer-file-name">Uses the driver if left empty</span></span>
-                  <span class="choose-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg> Choose file</span>
-                </label>
-                <button type="button" id="reuse-driver" class="button text-button" hidden>Clear reviewer file</button>
-                <p class="field-message" id="model-error" role="alert" hidden></p>
-                <div class="settings-actions">
-                  <button type="button" id="apply-models" class="button primary"><span id="apply-label">Use models</span> <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
-                  <button type="button" id="clear-models" class="button border-button" hidden>Clear models</button>
+          <div id="welcome-composer" class="welcome-composer">
+            <section class="composer-group" id="composer" aria-label="Message composer">
+              <div class="composer-box">
+                <label for="prompt" class="sr-only">Message Frenemy</label>
+                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Frenemy anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
+                <div class="composer-controls">
+                  <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Ask for an extra check before the answer. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
+                  <span class="composer-spacer"></span>
+                  <span class="key-hint" aria-hidden="true">Enter to send</span>
+                  <button type="button" id="send-button" class="send-button" aria-label="Send message" title="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
+                  <button type="button" id="stop-button" class="send-button stop-button" aria-label="Stop generating" title="Stop generating" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg></button>
                 </div>
-              </form>
-              <div class="snitch-note settings-note">
-                <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
-                <div><strong>Files stay on your device</strong><p>Nothing is uploaded. The selection lasts for this tab; choose the same files again after a reload.</p></div>
               </div>
-            </section>
-            <section class="panel model-settings" aria-labelledby="downloads-title">
-              <div class="panel-heading">
-                <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></span>
-                <div><h2 id="downloads-title">Find model files</h2><p>Free downloads from Hugging Face. Pick at least one.</p></div>
-              </div>
-              <ul class="downloads-list">
-                <li>
-                  <div class="download-head"><h3>Qwen2.5 0.5B Instruct</h3><span class="model-tag">491 MB</span></div>
-                  <p>A good first choice for the driver.</p>
-                  <code class="file-name">qwen2.5-0.5b-instruct-q4_k_m.gguf</code>
-                  <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" class="button border-button" target="_blank" rel="noreferrer" aria-label="Download Qwen2.5 0.5B Instruct GGUF"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download GGUF</a>
-                </li>
-                <li>
-                  <div class="download-head"><h3>SmolLM2 360M Instruct</h3><span class="model-tag">271 MB</span></div>
-                  <p>A smaller option for either role.</p>
-                  <code class="file-name">SmolLM2-360M-Instruct-Q4_K_M.gguf</code>
-                  <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" class="button border-button" target="_blank" rel="noreferrer" aria-label="Download SmolLM2 360M Instruct GGUF"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download GGUF</a>
-                </li>
-              </ul>
-              <p class="model-tip">Use the downloaded <code>.gguf</code> as-is in a current desktop version of Chrome or Edge. Each file must be under 1.2 GB.</p>
+              <div class="composer-status" id="composer-status" role="status" hidden><span id="composer-note"></span> <button type="button" class="text-action" id="open-busy" hidden>Open chat</button><button type="button" class="text-action" id="choose-model" data-settings hidden>Choose a model</button></div>
             </section>
           </div>
+          <div class="suggestions" aria-labelledby="suggestion-title">
+            <h2 id="suggestion-title">Try asking</h2>
+            <div class="suggestion-grid">
+              <button type="button" class="suggestion" data-prompt="explain"><span class="suggestion-icon tone-purple"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span><svg class="icon suggestion-arrow" aria-hidden="true"><use href="#i-arrow-ne"/></svg><span class="suggestion-name">Explain a topic</span><small>Make a tricky idea click</small></button>
+              <button type="button" class="suggestion" data-prompt="write"><span class="suggestion-icon tone-pink"><svg class="icon" aria-hidden="true"><use href="#i-pen"/></svg></span><svg class="icon suggestion-arrow" aria-hidden="true"><use href="#i-arrow-ne"/></svg><span class="suggestion-name">Help me write</span><small>Find the right words</small></button>
+              <button type="button" class="suggestion" data-prompt="ideas"><span class="suggestion-icon tone-gold"><svg class="icon" aria-hidden="true"><use href="#i-bulb"/></svg></span><svg class="icon suggestion-arrow" aria-hidden="true"><use href="#i-arrow-ne"/></svg><span class="suggestion-name">Brainstorm ideas</span><small>Get past the blank page</small></button>
+              <button type="button" class="suggestion" data-prompt="plan"><span class="suggestion-icon tone-mint"><svg class="icon" aria-hidden="true"><use href="#i-plan"/></svg></span><svg class="icon suggestion-arrow" aria-hidden="true"><use href="#i-arrow-ne"/></svg><span class="suggestion-name">Make a plan</span><small>Turn a goal into steps</small></button>
+            </div>
+          </div>
         </section>
-        <footer class="footer"><span>FRENEMY / RELAY DESK</span><span>FREE &amp; OPEN SOURCE</span></footer>
-      </main>
-    </div>
+        <section class="thread chat-width" id="thread" aria-label="Conversation" hidden></section>
+      </div>
+
+      <div class="dock chat-width" id="chat-dock" hidden>
+        <button type="button" class="icon-button scroll-latest" id="scroll-latest" aria-label="Scroll to latest message" title="Scroll to latest message" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button>
+      </div>
+      <footer class="main-footer"><p>AI can make mistakes. Check important information.</p><span aria-hidden="true">·</span><button type="button" class="text-action" id="open-privacy">Privacy</button></footer>
+    </main>
   </div>
 
-  <dialog class="dialog" id="guide-dialog" aria-labelledby="guide-title">
-    <div class="dialog-header">
-      <span class="heading-icon secondary"><svg class="icon" aria-hidden="true"><use href="#i-help"/></svg></span>
-      <button type="button" class="button icon-button" data-close aria-label="Close guide"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
-    </div>
-    <h2 id="guide-title">How a relay works</h2>
-    <dl class="guide-list">
-      <div><dt>Draft &amp; review</dt><dd>The driver drafts a response, the reviewer critiques it, and the driver writes a final answer using that feedback.</dd></div>
-      <div><dt>Compare answers</dt><dd>Both models answer the same prompt independently, so you can compare their approaches.</dd></div>
-      <div><dt>Quick answer</dt><dd>Get one direct response without waiting for a separate review and revision.</dd></div>
-      <div><dt>Where models run</dt><dd>Community AI sends prompts to free volunteer workers. Choose Local model files in Settings to run GGUF models on your device without sharing prompts.</dd></div>
-    </dl>
-    <p class="model-tip">The original <a href="https://github.com/noblehacks/frenemy" target="_blank" rel="noreferrer">Frenemy desktop tools</a> are separate. This web edition does not log into Claude, Codex, Gemini, or Kimi or run commands on your machine.</p>
-    <div class="dialog-actions"><button type="button" class="button primary" data-close>Back to workspace</button></div>
+  <dialog class="dialog" id="consent-dialog" aria-labelledby="consent-title">
+    <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close community notice"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <h2 id="consent-title">Chat with Community AI</h2>
+    <p>Your message and relevant recent conversation go to AI Horde and its volunteer workers. Think deeper can also share draft answers. Don’t include personal information, passwords, or anything confidential.</p>
+    <p class="fine-print">By continuing you confirm you’re over 13 and accept AI Horde’s <a href="https://aihorde.net/terms" target="_blank" rel="noopener noreferrer">terms</a> and <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a>. Your permission lasts for this page session.</p>
+    <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" class="button primary" id="accept-community">Accept and send</button></div>
   </dialog>
 
-  <dialog class="dialog" id="community-dialog" aria-labelledby="community-title">
-    <div class="dialog-header">
-      <span class="heading-icon accent"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
-      <button type="button" class="button icon-button" data-close aria-label="Close community notice"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+  <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Frenemy answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <fieldset class="engine-options" id="engine-options">
+      <legend>AI connection</legend>
+      <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
+      <label class="engine-option"><input type="radio" name="engine" value="local" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>On-device</strong><small>Use a GGUF model file</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
+    </fieldset>
+    <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
+    <div class="settings-box" id="community-settings">
+      <p>Frenemy uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
+      <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
+      <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
+      <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
     </div>
-    <h2 id="community-title">Use community AI?</h2>
-    <p>Your prompt and any draft or review needed for this relay will be sent to AI Horde and its volunteer workers. Don’t send passwords, personal information, or anything confidential.</p>
-    <p class="model-tip">By continuing, you confirm you’re over 13 and accept AI Horde’s <a href="https://aihorde.net/terms" target="_blank" rel="noreferrer">terms</a> and <a href="https://aihorde.net/privacy" target="_blank" rel="noreferrer">privacy policy</a>. Permission lasts for this tab.</p>
-    <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" id="allow-community" class="button primary">Accept and run</button></div>
+    <div class="settings-box" id="local-settings" hidden>
+      <p>Only on-device chat needs a download. Your model and on-device messages stay in this browser. Select the file again after reloading the page.</p>
+      <label class="file-picker" for="model-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span id="file-label">Choose a .gguf file</span><input type="file" id="model-file" accept=".gguf" class="sr-only"></label>
+      <p id="model-error" class="model-error" role="alert" hidden></p>
+      <div class="settings-buttons"><button class="text-action" type="button" id="clear-model" hidden>Remove selected file</button></div>
+      <p class="fine-print">Need a model? <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" target="_blank" rel="noopener noreferrer">Qwen2.5 (491 MB)</a> or <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" target="_blank" rel="noopener noreferrer">SmolLM2 (271 MB)</a>.</p>
+    </div>
+    <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
 
-  <dialog class="dialog" id="clear-dialog" aria-labelledby="clear-title">
-    <h2 id="clear-title">Clear run history?</h2>
-    <p>This permanently removes the saved prompts and responses from this browser.</p>
-    <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Keep history</button><button type="button" id="confirm-clear" class="button danger-button">Clear history</button></div>
+  <dialog class="dialog search-dialog" id="search-dialog" aria-labelledby="search-title">
+    <div class="dialog-top"><h2 id="search-title">Search chats</h2><button type="button" class="icon-button" data-close aria-label="Close search"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <label class="search-field" for="search-input"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span class="sr-only">Search conversations</span><input type="search" id="search-input" maxlength="120" placeholder="Search conversations…" autofocus></label>
+    <p class="fine-print search-empty" id="search-empty" role="status"></p>
+    <ul id="search-results" class="search-results"></ul>
   </dialog>
-  <div id="announcer" role="status" class="sr-only" aria-atomic="true"></div>
-  <div id="toast" class="toast" hidden></div>
-  <noscript><p class="noscript">Frenemy needs JavaScript to run relays in your browser.</p></noscript>
+
+  <dialog class="dialog" id="options-dialog" aria-labelledby="options-title">
+    <div class="dialog-top"><h2 id="options-title">Chat options</h2><button type="button" class="icon-button" data-close aria-label="Close chat options"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <label class="text-label" for="rename-input">Chat title</label><input type="text" id="rename-input" class="text-field" maxlength="80" autofocus>
+    <div class="dialog-actions split"><button type="button" class="button border-button danger-text" id="delete-chat"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete chat</button><button type="button" class="button primary" id="save-title">Save title</button></div>
+  </dialog>
+
+  <dialog class="dialog" id="remove-dialog" aria-labelledby="remove-title">
+    <div class="dialog-top"><h2 id="remove-title">Delete chat?</h2><button type="button" class="icon-button" data-close aria-label="Close delete confirmation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p id="remove-description">This permanently removes the chat from this browser.</p>
+    <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" class="button danger" id="confirm-remove">Delete</button></div>
+  </dialog>
+
+  <dialog class="dialog" id="privacy-dialog" aria-labelledby="privacy-title">
+    <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close privacy information" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <h2 id="privacy-title">Chat privacy</h2>
+    <p><strong>Community AI.</strong> Your message and relevant recent conversation are sent to <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">AI Horde and its volunteer workers</a>. Don’t share private information.</p>
+    <p><strong>On-device.</strong> Your model file and on-device messages aren’t sent to the community service, even if you switch connections later.</p>
+    <p><strong>History.</strong> Chats are stored in this browser, not synced to an account. You can delete individual chats or clear them all in Settings. That doesn’t delete data already sent to a provider.</p>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <p id="announcer" class="sr-only" role="status"></p>
+  <noscript><div class="no-script">Enable JavaScript to use Frenemy chat.</div></noscript>
 </body>
 </html>

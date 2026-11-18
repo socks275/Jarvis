@@ -1,17 +1,16 @@
+import { estimateTokens, OUTPUT_LIMIT, shorterContext } from './chat.mjs';
+
 const API = 'https://oai.aihorde.net/v1';
 const MAX_CANDIDATES = 5;
-// Stay within the Horde's default free output floor. This includes any reasoning tokens.
-const FREE_TOKENS = 512;
+const FREE_TOKENS = 512; // The documented default free floor includes thinking tokens.
 const MIN_TOKENS = 64;
-const STAGE_TOKENS = { answer: 512, draft: 512, review: 352, final: 512, peer: 512 };
-const DISCOVERY_TIMEOUT = 12000;
-const RESPONSE_TIMEOUT = 150000;
-const size = new TextEncoder();
+const DISCOVERY_TIMEOUT = 12_000;
+const RESPONSE_TIMEOUT = 150_000;
 
 function waitSeconds(value) {
   if (!value) return 0;
   const seconds = /^\d+$/.test(value) ? Number(value) : (Date.parse(value) - Date.now()) / 1000;
-  return Number.isFinite(seconds) && seconds > 0 ? Math.min(3600, Math.ceil(seconds)) : 0;
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(86_400, Math.ceil(seconds)) : 0;
 }
 
 class CommunityError extends Error {
@@ -26,37 +25,109 @@ function providerError(response, payload) {
   const { status, headers } = response;
   const code = payload?.error?.code;
   const retryAfter = waitSeconds(headers.get('Retry-After'));
-  const wait = retryAfter ? ` Try again in about ${retryAfter} seconds.` : ' Try again later.';
+  const wait = retryAfter ? ' Try again after the cooldown.' : ' Try again in a moment.';
   let message;
   if (status === 429 || ['FrontAtCapacity', 'queue_unavailable'].includes(code)) {
-    message = `AI Horde is busy or limiting anonymous requests.${wait}`;
+    message = `The community network is busy.${wait}`;
   } else if (code === 'no_eligible_worker' || code === 'no_worker_supports_limit') {
-    message = `No online worker could handle this step.${wait} A shorter prompt or Quick answer may help.`;
+    message = `No online model could handle this message.${wait} A shorter message may help.`;
   } else if (code === 'KudosUpfront' || status === 402) {
-    message = 'This request exceeds AI Horde’s current free allowance. Try a shorter prompt or Quick answer.';
+    message = 'This message exceeds the network’s current free allowance. Try a shorter message.';
   } else if (status === 401 || status === 403) {
-    message = 'AI Horde did not allow this anonymous request. No account or key was sent.';
+    message = 'AI Horde isn’t accepting this anonymous request. No account or key was sent.';
   } else if (status === 408 || status === 504) {
-    message = 'AI Horde timed out before a reply arrived. Try Quick answer or wait and retry.';
+    message = 'The community network timed out before a reply arrived. Try again in a moment.';
   } else if (status === 400 || status === 413) {
-    message = 'AI Horde declined this request. Try a shorter prompt or another mode.';
+    message = 'The network declined this request. Try a shorter message or start a new chat.';
   } else {
     message = `AI Horde couldn’t complete the request (${status}).${wait}`;
   }
-  // Refresh only a documented pre-queue model lookup refusal. A timed-out or refused
-  // generation might still have reached a worker; never send a duplicate in that case.
+  // Only refresh on a documented pre-queue model refusal. Do not duplicate jobs after a timeout or disconnect.
   const refresh = status === 404 && ['UnknownChatModel', 'model_not_found'].includes(code)
     && !retryAfter && headers.get('x-should-retry') !== 'false';
   return new CommunityError(message, { refresh, retryAfter });
 }
 
-async function request(path, { fetchImpl, signal, body, timeout }) {
+function queueInfo(line) {
+  if (!line.startsWith(': horde')) return null;
+  const position = Number(/\bqueue_position=(\d+)\b/.exec(line)?.[1]);
+  const seconds = Number(/\bwait_time=(\d+)\b/.exec(line)?.[1]);
+  return {
+    ...(Number.isSafeInteger(position) && position > 0 ? { position } : {}),
+    ...(Number.isSafeInteger(seconds) && seconds > 0 ? { seconds } : {}),
+  };
+}
+
+function reply(text, model, finish) {
+  if (finish === 'content_filter') throw new CommunityError('The provider did not return a reply for this message.');
+  if (typeof text !== 'string' || !text.trim()) throw new CommunityError('The online model returned no text. Try again or rephrase your message.');
+  return {
+    text: text.trim().slice(0, OUTPUT_LIMIT),
+    ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 300) } : {}),
+    limited: finish === 'length' || text.length > OUTPUT_LIMIT,
+  };
+}
+
+async function streamReply(response, signal, onText, onQueue) {
+  const interrupted = () => new CommunityError('The online reply was interrupted before it finished. Try again in a moment.');
+  if (!response.body) throw interrupted();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', data = [], text = '', model, finish, done = false, capped = false;
+  function line(raw) {
+    if (raw.startsWith(':')) {
+      const queue = queueInfo(raw);
+      if (queue && !text) onQueue(queue);
+      return;
+    }
+    if (raw.startsWith('data:')) data.push(raw.slice(5).replace(/^ /, ''));
+    if (raw || !data.length) return;
+    const event = data.join('\n');
+    data = [];
+    if (event === '[DONE]') { done = true; return; }
+    let payload;
+    try { payload = JSON.parse(event); } catch { throw interrupted(); }
+    if (payload?.error) throw interrupted();
+    if (typeof payload?.model === 'string') model = payload.model.trim().slice(0, 300);
+    const choice = payload?.choices?.[0];
+    if (choice?.finish_reason) finish = choice.finish_reason;
+    const added = choice?.delta?.content;
+    if (typeof added === 'string' && added && !capped) {
+      capped = text.length + added.length > OUTPUT_LIMIT;
+      text = (text + added).slice(0, OUTPUT_LIMIT);
+      onText(text);
+    }
+  }
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      signal.throwIfAborted();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let next;
+      while (!done && (next = buffer.indexOf('\n')) !== -1) {
+        const raw = buffer.slice(0, next).replace(/\r$/, '');
+        buffer = buffer.slice(next + 1);
+        line(raw);
+      }
+      if (buffer.length > 128_000 || data.length > 64) throw interrupted();
+    }
+    if (!done || !finish) throw interrupted();
+    return reply(text, model, capped ? 'length' : finish);
+  } finally {
+    // Close the body when a stream ends early or the user stops it.
+    reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+async function request(path, { fetchImpl, signal, body, timeout, onText = () => {}, onQueue = () => {} }) {
   signal?.throwIfAborted();
   const connection = new AbortController();
   const stop = () => connection.abort(signal.reason);
   signal?.addEventListener('abort', stop, { once: true });
   const timer = setTimeout(() => connection.abort(new CommunityError(body
-    ? 'No reply arrived within 2½ minutes. Try Quick answer or wait and retry.'
+    ? 'No complete reply arrived within 2½ minutes. Try again in a moment.'
     : 'AI Horde did not return its model list. Try again in a moment.')), timeout);
   try {
     const response = await fetchImpl(API + path, {
@@ -64,10 +135,17 @@ async function request(path, { fetchImpl, signal, body, timeout }) {
       ...(body ? { headers: { 'Content-Type': 'application/json', 'X-Title': 'Frenemy Web' }, body: JSON.stringify(body) } : {}),
       cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: connection.signal,
     });
+    if (response.ok && body && response.headers.get('Content-Type')?.includes('text/event-stream')) {
+      return await streamReply(response, connection.signal, onText, onQueue);
+    }
     const data = await response.json().catch(() => null);
     connection.signal.throwIfAborted();
     if (!response.ok) throw providerError(response, data);
     if (!data || typeof data !== 'object') throw new CommunityError('AI Horde returned an unreadable response. Please try again.');
+    if (body) {
+      const choice = data.choices?.[0];
+      return reply(choice?.message?.content, data.model, choice?.finish_reason);
+    }
     return data;
   } catch (error) {
     connection.signal.throwIfAborted();
@@ -95,61 +173,60 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
     if (Array.isArray(card.architecture?.input_modalities) && !card.architecture.input_modalities.includes('text')) continue;
     models.set(id, { id, count, context, tokens, queue: Number.isFinite(queue) && queue >= 0 ? queue : Infinity });
   }
-  // This is a capacity ranking, not a claim about model quality.
+  // Capacity ranking, not a claim about model quality.
   return [...models.values()].sort((a, b) => (a.queue / a.count - b.queue / b.count) || b.count - a.count || a.id.localeCompare(b.id));
 }
 
-export function planCommunityRequest(models, { stage, input, driver }) {
-  if (!models.length) throw new CommunityError('No eligible text models are online on AI Horde. Try again later or use local files in Settings.');
-  // A rough, conservative fit; the provider still checks the real token count.
-  const inputEstimate = Math.ceil(size.encode(input).length / 2) + 64;
-  const desired = Math.min(FREE_TOKENS, STAGE_TOKENS[stage.key] ?? FREE_TOKENS);
-  let choices = models.map((model) => ({ ...model, room: Math.floor(Math.min(desired, model.tokens, model.context - inputEstimate)) }))
-    .filter((model) => model.room >= MIN_TOKENS);
-  if (!choices.length) throw new CommunityError('The models online right now cannot fit this step. Try a shorter prompt or Quick answer.');
-  if (stage.role === 'reviewer' && driver && choices.some((model) => model.id !== driver)) {
-    choices = choices.filter((model) => model.id !== driver);
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan }) {
+  if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
+  const desired = purpose === 'review' ? 352 : FREE_TOKENS;
+  let reduced;
+  for (let context = messages; ; context = shorterContext(context)) {
+    const input = estimateTokens(context);
+    const fitting = models.map((m) => ({ ...m, room: Math.floor(Math.min(desired, m.tokens, m.context - input)) }))
+      .filter((m) => m.room >= MIN_TOKENS);
+    const full = fitting.filter((m) => m.room >= desired);
+    if (full.length) return body(full, context);
+    if (fitting.length && !reduced) reduced = body(fitting, context);
+    if (context.length <= 2) break;
   }
-  const fitting = choices.filter((model) => model.room >= desired);
-  const candidates = (fitting.length ? fitting : choices).slice(0, MAX_CANDIDATES);
-  return {
-    models: candidates.map(({ id }) => id),
-    messages: [{ role: 'user', content: input }],
-    max_tokens: Math.min(...candidates.map(({ room }) => room)),
-    horde: { context_fit: 'grow', include_reasoning: false },
-  };
+  if (reduced) return reduced;
+  throw new CommunityError('The models online right now cannot fit this message. Try shortening it or start a new chat.');
+
+  function body(fitting, context) {
+    const others = preferOtherThan ? fitting.filter((m) => m.id !== preferOtherThan) : [];
+    const candidates = (others.length ? others : fitting).slice(0, MAX_CANDIDATES);
+    return {
+      models: candidates.map(({ id }) => id), messages: context, stream: true,
+      max_tokens: Math.min(...candidates.map(({ room }) => room)), temperature: 0.55,
+      horde: { context_fit: 'grow', include_reasoning: false },
+    };
+  }
 }
 
 export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLimit = () => {}, fetchImpl = globalThis.fetch } = {}) {
-  let driver;
   return {
-    async generate({ stage, input, signal }) {
+    async generate({ messages, signal, purpose, preferOtherThan, onText }) {
       const plan = async () => {
-        onPhase(stage.key, 'selecting');
+        onPhase('finding');
         const models = await getOnlineModels({ signal, fetchImpl });
         onModels(models);
-        return planCommunityRequest(models, { stage, input, driver });
+        return planCommunityRequest(models, { messages, purpose, preferOtherThan });
       };
       const complete = (body) => {
-        onPhase(stage.key, 'waiting');
-        return request('/chat/completions', { body, fetchImpl, signal, timeout: RESPONSE_TIMEOUT });
+        onPhase('waiting');
+        return request('/chat/completions', { body, fetchImpl, signal, timeout: RESPONSE_TIMEOUT, onText,
+          onQueue: (queue) => onPhase('waiting', queue) });
       };
       try {
         const first = await plan();
-        let data;
-        try {
-          data = await complete(first);
-        } catch (error) {
+        try { return await complete(first); }
+        catch (error) {
           if (!error.refresh) throw error;
           const next = await plan();
           if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) throw error;
-          data = await complete(next);
+          return await complete(next);
         }
-        if (stage.key === 'draft' && typeof data.model === 'string') driver = data.model;
-        const choice = data.choices?.[0];
-        const text = choice?.message?.content;
-        if (typeof text !== 'string' || !text.trim()) throw new CommunityError('The volunteer model returned no answer. Try Quick answer or try again later.');
-        return { text, model: data.model, limited: choice.finish_reason === 'length' };
       } catch (error) {
         if (error.retryAfter) onLimit(error.retryAfter);
         throw error;

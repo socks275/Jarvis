@@ -1,5 +1,9 @@
+import { estimateTokens, OUTPUT_LIMIT, shorterContext } from './chat.mjs';
+
 const MAX_MODEL_BYTES = 1_200_000_000;
-const STAGE_TIMEOUT = 5 * 60 * 1000;
+const TIMEOUT = 5 * 60 * 1000;
+const TOKENS = 384;
+export const LOCAL_CONTEXT = 4096;
 
 export async function validateModel(file) {
   if (!file || !file.name.toLowerCase().endsWith('.gguf')) throw new Error('Choose a .gguf model file.');
@@ -11,24 +15,21 @@ export async function validateModel(file) {
   }
 }
 
-// This per-run worker is disposable, including while a model is still being read.
-// The File handle is cloned between threads; no HTTP request includes model or prompt data.
-export function browserEngine(files, onPhase) {
+// Only the browser's own worker receives the file and messages.
+export function browserEngine(file, onPhase = () => {}) {
   let worker;
-  let nextId = 0;
   const dispose = () => {
     worker?.terminate();
     worker = undefined;
   };
-
   return {
     dispose,
-    async generate({ stage, input, signal }) {
+    async generate({ messages, signal, onText = () => {} }) {
       signal.throwIfAborted();
-      const slot = stage.role === 'reviewer' && files.reviewer ? 'reviewer' : 'driver';
-      worker ??= new Worker(new URL('./model.worker.mjs', import.meta.url), { type: 'module' });
+      while (messages.length > 2 && estimateTokens(messages) + TOKENS > LOCAL_CONTEXT) messages = shorterContext(messages);
+      if (estimateTokens(messages) + TOKENS > LOCAL_CONTEXT) throw new Error('This message is too long for the local model. Try shortening it.');
+      worker = new Worker(new URL('./model.worker.mjs', import.meta.url), { type: 'module' });
       const active = worker;
-      const id = ++nextId;
       return new Promise((resolve, reject) => {
         function finish(error, answer) {
           clearTimeout(timer);
@@ -36,24 +37,28 @@ export function browserEngine(files, onPhase) {
           active.removeEventListener('messageerror', broken);
           active.removeEventListener('error', broken);
           signal.removeEventListener('abort', stop);
-          if (error) { dispose(); reject(error); }
+          dispose();
+          if (error) reject(error);
           else resolve(answer);
         }
         function message(event) {
           const data = event.data;
-          if (data?.id !== id) return;
-          if (data.type === 'phase') onPhase(stage.key, data.phase);
-          else if (data.type === 'result') finish(null, data.text);
-          else if (data.type === 'error') finish(new Error(data.message));
+          if (data?.type === 'phase') onPhase(data.phase);
+          else if (data?.type === 'text' && typeof data.text === 'string') onText(data.text.slice(0, OUTPUT_LIMIT));
+          else if (data?.type === 'result') {
+            const text = data.text?.trim();
+            if (!text) { finish(new Error('The local model returned no text. Try rephrasing your message.')); return; }
+            finish(null, { text: text.slice(0, OUTPUT_LIMIT), model: file.name.replace(/\.gguf$/i, '').slice(0, 300), limited: data.limited });
+          } else if (data?.type === 'error') finish(new Error(data.message));
         }
-        function broken() { finish(new Error('Could not start browser AI. Open the site in a current desktop Chrome or Edge window and try again.')); }
+        function broken() { finish(new Error('Could not start local AI. Open the site in current desktop Chrome or Edge and try again.')); }
         function stop() { finish(signal.reason); }
-        const timer = setTimeout(() => finish(new Error('This model did not finish in five minutes. Try a smaller quantized GGUF file or a shorter prompt.')), STAGE_TIMEOUT);
+        const timer = setTimeout(() => finish(new Error('The local model took more than five minutes. Try a smaller quantized GGUF file.')), TIMEOUT);
         active.addEventListener('message', message);
         active.addEventListener('error', broken);
         active.addEventListener('messageerror', broken);
         signal.addEventListener('abort', stop, { once: true });
-        try { active.postMessage({ id, slot, file: files[slot], input, maxTokens: stage.tokens }); }
+        try { active.postMessage({ file, messages, maxTokens: TOKENS, context: LOCAL_CONTEXT }); }
         catch { broken(); }
       });
     },
