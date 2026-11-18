@@ -1,0 +1,22 @@
+{
+  "name": "frenemy-web",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A free chat interface for online and on-device AI models",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "start": "node scripts/build-web.mjs && node scripts/serve-web.mjs",
+    "build": "node scripts/build-web.mjs",
+    "test": "node --test web-test/chat.test.mjs web-test/community.test.mjs web-test/engine.test.mjs web-test/format.test.mjs web-test/server.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@fontsource-variable/manrope": "5.3.0",
+    "@fontsource/instrument-serif": "5.3.0",
+    "@wllama/wllama": "3.13.0",
+    "markdown-it": "15.0.3"
+  }
+}

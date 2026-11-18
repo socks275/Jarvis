@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+config/
+.worker-state/
+.fleet/
+.env
+.env.*
+*.log
+*.vsix
+*.zip
+
+# Generated static website
+dist/
