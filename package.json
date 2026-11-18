@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node scripts/build-web.mjs && node scripts/serve-web.mjs",
     "build": "node scripts/build-web.mjs",
-    "test": "node --test web-test/engine.test.mjs web-test/relay.test.mjs web-test/server.test.mjs"
+    "test": "node --test web-test/community.test.mjs web-test/engine.test.mjs web-test/relay.test.mjs web-test/server.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "5.3.0",

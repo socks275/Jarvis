@@ -1,6 +1,7 @@
 import { browserEngine, validateModel } from './engine.mjs';
+import { communityEngine, getOnlineModels } from './community.mjs';
 import {
-  HISTORY_KEY, MODE_LABELS, PLANS, PROMPT_LIMIT, STATE_LABELS,
+  ENGINE_LABELS, HISTORY_KEY, MODE_LABELS, PLANS, PROMPT_LIMIT, STATE_LABELS,
   addToHistory, createRun, executeRelay, readHistory, resultStep, saveHistory,
 } from './relay.mjs';
 
@@ -8,6 +9,8 @@ const $ = (id) => document.getElementById(id);
 const form = $('relay-form');
 const prompt = $('prompt');
 const modelForm = $('models-form');
+const communityDialog = $('community-dialog');
+const connections = [...$('connection-options').querySelectorAll('input[name=connection]')];
 const modelRoles = ['driver', 'reviewer'];
 const views = {
   workspace: { name: 'Relay desk', focus: 'main' },
@@ -25,6 +28,13 @@ let history = readHistory(storage);
 let files = { driver: null, reviewer: null };
 let pendingFiles = { ...files };
 let verifyingFiles = false;
+let connection = 'community';
+let communityAllowed = false;
+let statusController;
+let onlineModels;
+let networkError = '';
+let retryAt = 0;
+let retryTimer;
 let currentView = 'workspace';
 let visibleRun;
 let selection;
@@ -73,44 +83,84 @@ function paintPrompt() {
 }
 
 function setBusy(active) {
+  const cooling = connection === 'community' && retryAt > Date.now();
   prompt.readOnly = active;
   for (const radio of modes) radio.disabled = active;
-  $('run-button').disabled = active || !files.driver;
+  $('run-button').disabled = active || cooling || (connection === 'local' && !files.driver);
   $('run-button').querySelector('use').setAttribute('href', active ? '#i-wave' : '#i-play');
   $('run-label').textContent = active ? 'Running…' : 'Run relay';
   $('stop-button').hidden = !active;
+  $('relay-cooldown').hidden = !cooling;
+  $('relay-cooldown').textContent = cooling ? 'AI Horde asked us to wait. You can try again when Run relay is enabled.' : '';
   paintSettings();
 }
 
 function paintModels() {
-  const ready = Boolean(files.driver);
-  const driver = ready ? modelName(files.driver) : 'Not set';
-  const reviewer = files.reviewer ? modelName(files.reviewer) : ready ? 'Same as driver' : 'Not set';
+  const community = connection === 'community';
+  const ready = community || Boolean(files.driver);
+  const driver = community ? 'Auto-select' : files.driver ? modelName(files.driver) : 'Not set';
+  const reviewer = community ? 'Prefer a different model' : files.reviewer ? modelName(files.reviewer) : files.driver ? 'Same as driver' : 'Not set';
   $('driver-name').textContent = $('driver-name').title = driver;
   $('reviewer-name').textContent = $('reviewer-name').title = reviewer;
   $('setup-button').hidden = ready;
   $('configure-models').hidden = !ready;
   $('run-button').hidden = !ready;
   $('run-hotkey').hidden = !ready;
-  $('note-title').textContent = ready ? 'Models run on your device' : 'No models loaded';
-  $('note-body').textContent = ready
-    ? 'Relays use your CPU. Keep this tab open while a model is working.'
-    : 'Choose a GGUF model in Settings to run a relay. One file can play both roles.';
-  $('note-action').hidden = ready;
+  $('note-title').textContent = community ? 'Online models, no download' : ready ? 'Models run on your device' : 'No models loaded';
+  $('note-body').textContent = community
+    ? 'Community runs send your prompt to AI Horde’s volunteer workers. Don’t include private information.'
+    : ready ? 'Relays use your CPU. Keep this tab open while a model is working.'
+      : 'Choose a GGUF model in Settings to run locally, or switch to Community AI.';
+  $('note-action').textContent = community ? 'Connection details' : 'Model settings';
+  $('runtime-badge').textContent = community ? 'Community AI' : 'On-device AI';
+  $('rail-runtime-title').textContent = community ? 'Community AI' : 'Local by design';
+  $('rail-runtime-detail').textContent = community ? 'No model downloads.' : 'Your prompts stay here.';
+  for (const id of ['header-runtime-icon', 'rail-runtime-icon']) $(id).setAttribute('href', community ? '#i-globe' : '#i-laptop');
+  $('hero-description').textContent = community
+    ? 'Draft, review, and refine with models that are online now. No model downloads, accounts, or personal keys.'
+    : 'Draft, review, and refine with open models on your device. Your prompts never leave this tab.';
+  setBusy(Boolean(controller));
+}
+
+function showOnlineModels(models) {
+  onlineModels = models;
+  networkError = '';
+  paintNetwork();
+}
+
+function paintNetwork() {
+  $('network-status').textContent = statusController ? 'Checking AI Horde…' : networkError || (onlineModels === undefined
+    ? 'Availability hasn’t been checked yet. Every relay checks again before each step.'
+    : onlineModels.length ? `${onlineModels.length} eligible models were online at the last check.`
+      : 'No eligible models were online at the last check. Try again later.');
+  $('online-models').replaceChildren(...(networkError ? [] : (onlineModels ?? []).slice(0, 5).map(({ id }) => element('li', '', id))));
+  $('check-network').disabled = Boolean(statusController || controller) || retryAt > Date.now();
+  $('reset-permission').hidden = !communityAllowed;
+  $('reset-permission').disabled = Boolean(controller);
+}
+
+function coolDown(seconds) {
+  retryAt = Math.max(retryAt, Date.now() + seconds * 1000);
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => { retryAt = 0; setBusy(Boolean(controller)); }, retryAt - Date.now());
   setBusy(Boolean(controller));
 }
 
 function activeTimeline() {
   const plan = PLANS[visibleRun?.mode ?? mode()];
   return plan.map((stage, i) => {
-    const state = visibleRun?.steps[i].state ?? 'waiting';
+    const step = visibleRun?.steps[i];
+    const state = step?.state ?? 'waiting';
     let detail = stage.detail;
     if (state === 'running') {
+      const phase = livePhase?.key === stage.key ? livePhase.phase : '';
       const name = visibleRun.names[stage.role];
-      detail = livePhase?.key === stage.key && livePhase.phase === 'generating' ? `${name} is writing…` : `Loading ${name}…`;
-    } else if (state === 'done') detail = visibleRun.names[stage.role];
+      detail = visibleRun.engine === 'community'
+        ? phase === 'waiting' ? 'Waiting for a volunteer model…' : 'Finding eligible online models…'
+        : phase === 'generating' ? `${name} is writing…` : `Loading ${name}…`;
+    } else if (state === 'done') detail = step.model ?? visibleRun.names[stage.role];
     else if (state === 'failed' || state === 'stopped') detail = STATE_LABELS[state];
-    else if (visibleRun?.state === 'failed' || visibleRun?.state === 'stopped') detail = 'Not run';
+    else if (['partial', 'failed', 'stopped'].includes(visibleRun?.state)) detail = 'Not run';
     return { ...stage, state, detail };
   });
 }
@@ -144,7 +194,7 @@ function paintResult() {
   $('result').hidden = !run;
   if (!run) return;
   const shown = resultStep(run, selection);
-  $('result-description').textContent = `${MODE_LABELS[run.mode]} · ${STATE_LABELS[run.state]}`;
+  $('result-description').textContent = `${MODE_LABELS[run.mode]} · ${ENGINE_LABELS[run.engine]} · ${STATE_LABELS[run.state]}`;
   const selectedStep = run.steps.find((step) => step.key === shown);
   const tabs = $('result-tabs');
   const focusedKey = tabs.contains(document.activeElement) && document.activeElement.dataset.key;
@@ -172,8 +222,11 @@ function paintResult() {
     stopped: 'This stage was stopped.',
   }[selectedStep.state] ?? 'No response.');
   $('copy-result').disabled = !selectedStep.text;
+  const selectedRole = PLANS[run.mode].find((stage) => stage.key === shown).role;
+  $('result-source').hidden = !selectedStep.text;
+  $('result-source').textContent = `Model: ${selectedStep.model ?? run.names[selectedRole]}${selectedStep.limited ? ' · Output limit reached' : ''}`;
   $('result-error').hidden = !run.error;
-  $('result-error').textContent = run.error;
+  $('result-error').textContent = run.state === 'partial' ? `Earlier responses are available. ${run.error}` : run.error;
 }
 
 function paintRun() { paintTimeline(); paintResult(); }
@@ -189,7 +242,7 @@ function paintHistory() {
     badge.dataset.state = run.state;
     const message = element('p', 'history-prompt', run.prompt);
     message.title = run.prompt;
-    const meta = element('p', 'history-meta', `${MODE_LABELS[run.mode]} · ${dateFormat.format(run.createdAt)}`);
+    const meta = element('p', 'history-meta', `${MODE_LABELS[run.mode]} · ${ENGINE_LABELS[run.engine]} · ${dateFormat.format(run.createdAt)}`);
     content.append(badge, message, meta);
     const open = element('button', 'button border-button history-open', 'Open run');
     open.type = 'button';
@@ -231,6 +284,13 @@ function route(moveFocus = false) {
 
 function paintSettings() {
   const locked = Boolean(controller) || verifyingFiles;
+  for (const radio of connections) {
+    radio.checked = radio.value === connection;
+    radio.disabled = locked;
+  }
+  $('community-settings').hidden = connection !== 'community';
+  $('local-settings').hidden = connection !== 'local';
+  paintNetwork();
   for (const role of modelRoles) {
     const file = pendingFiles[role];
     const label = $(`${role}-file-name`);
@@ -244,6 +304,40 @@ function paintSettings() {
   $('apply-label').textContent = verifyingFiles ? 'Checking files…' : 'Use models';
   $('settings-busy').hidden = !controller;
 }
+
+for (const radio of connections) radio.addEventListener('change', () => {
+  connection = radio.value;
+  if (connection === 'local') statusController?.abort();
+  paintModels();
+});
+$('check-network').addEventListener('click', async () => {
+  if (statusController || controller || retryAt > Date.now()) return;
+  const lookup = new AbortController();
+  statusController = lookup;
+  networkError = '';
+  paintNetwork();
+  try {
+    showOnlineModels(await getOnlineModels({ signal: lookup.signal }));
+  } catch (error) {
+    if (!lookup.signal.aborted) {
+      networkError = error.message;
+      if (error.retryAfter) coolDown(error.retryAfter);
+    }
+  } finally {
+    statusController = undefined;
+    paintNetwork();
+  }
+});
+$('reset-permission').addEventListener('click', () => {
+  communityAllowed = false;
+  paintNetwork();
+  toast('You’ll be asked again before a community run.');
+});
+$('allow-community').addEventListener('click', () => {
+  communityAllowed = true;
+  communityDialog.close();
+  runRelay();
+});
 
 for (const button of document.querySelectorAll('[data-guide]')) button.addEventListener('click', () => $('guide-dialog').showModal());
 for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => button.closest('dialog').close());
@@ -309,7 +403,9 @@ form.addEventListener('submit', (event) => event.preventDefault());
 $('run-button').addEventListener('click', runRelay);
 async function runRelay() {
   if (controller || currentView !== 'workspace') return;
-  if (!files.driver) {
+  const community = connection === 'community';
+  if (community && retryAt > Date.now()) return;
+  if (!community && !files.driver) {
     location.hash = 'settings';
     return;
   }
@@ -318,23 +414,32 @@ async function runRelay() {
     // A timestamp and tab-local sequence also work in non-secure preview contexts.
     run = createRun({
       id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${++runSequence}`,
-      prompt: prompt.value, mode: mode(),
-      names: { driver: modelName(files.driver), reviewer: modelName(files.reviewer ?? files.driver) },
+      prompt: prompt.value, mode: mode(), engine: connection,
+      names: community ? { driver: 'Community model', reviewer: 'Community model' }
+        : { driver: modelName(files.driver), reviewer: modelName(files.reviewer ?? files.driver) },
     });
   } catch (error) {
     setPromptError(error.message);
     prompt.focus();
     return;
   }
+  if (community && !communityAllowed) {
+    communityDialog.showModal();
+    return;
+  }
+  statusController?.abort();
   controller = new AbortController();
   visibleRun = run;
   livePhase = selection = undefined;
-  const runtime = browserEngine(files, (key, phase) => { livePhase = { key, phase }; paintTimeline(); });
+  const onPhase = (key, phase) => { livePhase = { key, phase }; paintTimeline(); };
+  const runtime = community
+    ? communityEngine({ onPhase, onModels: showOnlineModels, onLimit: coolDown })
+    : browserEngine(files, onPhase);
   const buttonHadFocus = document.activeElement === $('run-button');
   setBusy(true);
   if (buttonHadFocus) $('stop-button').focus({ preventScroll: true });
   paintHistory();
-  announce('Local relay started.');
+  announce(community ? 'Community relay started.' : 'Local relay started.');
   try {
     await executeRelay(run, {
       generate: runtime.generate,
@@ -346,7 +451,7 @@ async function runRelay() {
     announce(`Relay ${STATE_LABELS[run.state].toLowerCase()}. See relay output.`);
     if (!saved) toast('Browser storage is unavailable. History will only last in this tab.');
   } finally {
-    runtime.dispose();
+    runtime.dispose?.();
     controller = undefined;
     const restoreFocus = document.activeElement === $('stop-button');
     setBusy(false);
