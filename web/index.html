@@ -105,7 +105,7 @@
                 <label for="prompt" class="sr-only">Message Frenemy</label>
                 <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Frenemy anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
                 <div class="composer-controls">
-                  <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Ask for an extra check before the answer. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
+                  <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
                   <span class="composer-spacer"></span>
                   <span class="key-hint" aria-hidden="true"><kbd>↵</kbd> Enter to send</span>
                   <button type="button" id="send-button" class="send-button" aria-label="Send message" title="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
@@ -138,7 +138,7 @@
   <dialog class="dialog" id="consent-dialog" aria-labelledby="consent-title">
     <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close community notice"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <h2 id="consent-title">Chat with Community AI</h2>
-    <p>Your message and relevant recent conversation go to AI Horde and its volunteer workers. Think deeper can also share draft answers. Don’t include personal information, passwords, or anything confidential.</p>
+    <p>Your message and relevant recent conversation go to AI Horde and its volunteer workers. A draft answer is shared with the other models that check and finish it. Don’t include personal information, passwords, or anything confidential.</p>
     <p class="fine-print">By continuing you confirm you’re over 13 and accept AI Horde’s <a href="https://aihorde.net/terms" target="_blank" rel="noopener noreferrer">terms</a> and <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a>. Your permission lasts for this page session.</p>
     <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" class="button primary" id="accept-community">Accept and send</button></div>
   </dialog>
@@ -153,6 +153,7 @@
     <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
       <p>Frenemy uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
+      <p>Replies usually use two models: one drafts, a second checks and finishes. Coding and long questions use three. Short chat stays with one model so it stays quick.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>

@@ -53,6 +53,13 @@ test('selects at most five compatible models, respects the free limit and prefer
   assert.equal(review.max_tokens, 352);
 });
 
+test('a final pass avoids every model that already worked on the reply', async () => {
+  const models = await getOnlineModels({ fetchImpl: async () => list(card('model-a'), card('model-b'), card('model-c')) });
+  const request = planCommunityRequest(models, { messages, purpose: 'final', preferOtherThan: ['model-a', 'model-b'] });
+  assert.deepEqual(request.models, ['model-c']);
+  assert.equal(request.max_tokens, 512);
+});
+
 test('only complete older turns are removed when resizing conversation context', () => {
   const history = [messages[0], { role: 'user', content: 'Old '.repeat(1100) },
     { role: 'assistant', content: 'Old answer' }, ...messages.slice(1)];

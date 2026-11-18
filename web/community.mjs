@@ -194,7 +194,10 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
   throw new CommunityError('The models online right now cannot fit this message. Try shortening it or start a new chat.');
 
   function body(fitting, context) {
-    const others = preferOtherThan ? fitting.filter((m) => m.id !== preferOtherThan) : [];
+    // One or more earlier models to avoid, so a check or a final pass really is
+    // written by a different model than the draft it is working from.
+    const avoid = preferOtherThan ? [].concat(preferOtherThan) : [];
+    const others = avoid.length ? fitting.filter((m) => !avoid.includes(m.id)) : [];
     const candidates = (others.length ? others : fitting).slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,

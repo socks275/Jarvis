@@ -216,17 +216,71 @@ function nearEnd() { return scroll.scrollHeight - scroll.clientHeight - scroll.s
 function scrollToEnd() { scroll.scrollTop = scroll.scrollHeight; $('scroll-latest').hidden = true; }
 function syncScroll() { $('scroll-latest').hidden = !current || nearEnd(); }
 
+const roleActive = {
+  answer: 'is answering', draft: 'is writing a draft', review: 'is checking the draft', final: 'is writing the final answer',
+};
+const roleDone = {
+  answer: 'answered', draft: 'wrote a draft', review: 'checked the draft', final: 'wrote the final answer',
+};
+
+function modelName(model) {
+  const name = typeof model === 'string' ? model.trim() : '';
+  return name.length > 34 ? `${name.slice(0, 33)}…` : name;
+}
+
+const roleSubject = { answer: 'A model', draft: 'A model', review: 'Another model', final: 'A new model' };
+
+function teamChip(step, live = false) {
+  const who = modelName(step.model) || roleSubject[step.role];
+  const chip = el('span', 'team-step', `${who} ${live ? roleActive[step.role] : roleDone[step.role]}`);
+  if (step.model) chip.title = step.model;
+  if (live) {
+    chip.dataset.live = '';
+    const dots = el('span', 'thinking-dots');
+    dots.setAttribute('aria-hidden', 'true');
+    dots.append(el('i'), el('i'), el('i'));
+    chip.append(dots);
+  }
+  return chip;
+}
+
+// The trail of models that worked on one reply: who drafted, who checked, who finished.
+function teamParts(steps = [], current) {
+  const total = steps.length + (current?.state === 'active' ? 1 : 0);
+  if (total < 2) return [];
+  return [el('span', 'team-count', `${total} models`), ...steps.map((step) => teamChip(step)),
+    ...(current?.state === 'active' ? [teamChip(current, true)] : [])];
+}
+
+function teamNode(steps = [], current) {
+  const node = el('p', 'team-steps');
+  const parts = teamParts(steps, current);
+  node.hidden = !parts.length;
+  node.append(...parts);
+  return node;
+}
+
+// The ETA is a provider estimate, not a promise; only show it while queued.
+function queueText(job) {
+  const position = job?.queue?.position;
+  if (!position) return '';
+  const seconds = job.queue?.seconds;
+  const eta = seconds && (seconds < 60 ? `about ${seconds}s` : `about ${Math.ceil(seconds / 60)} min`);
+  return `In the community queue${eta ? ` · ${eta}` : ''}`;
+}
+
 function phaseText(job) {
-  if (job?.message.deep) return 'Thinking it through…';
+  const step = job?.step;
+  if (step) {
+    const named = modelName(step.model);
+    const queue = queueText(job);
+    if (step.role === 'answer') return `${named ? `${named} is answering…` : 'Writing a reply…'}${queue ? ` · ${queue}` : ''}`;
+    const base = `${named || roleSubject[step.role]} ${roleActive[step.role]}…`;
+    return queue ? `${base} · ${queue}` : base;
+  }
   switch (job?.phase) {
     case 'finding': return 'Finding an online model…';
-    case 'waiting': {
-      const position = job.queue?.position;
-      // The ETA is a provider estimate, not a promise; only show it while queued.
-      const seconds = position && job.queue?.seconds;
-      const eta = seconds && (seconds < 60 ? `about ${seconds}s` : `about ${Math.ceil(seconds / 60)} min`);
-      return position ? `In the community queue${eta ? ` · ${eta}` : ''}` : 'Waiting for a community model…';
-    }
+    case 'waiting': return queueText(job) || 'Waiting for a community model…';
     case 'loading': return 'Loading your local model…';
     case 'generating': return 'Writing a reply…';
     default: return 'Getting ready…';
@@ -287,8 +341,9 @@ function messageNode(message, last) {
     const label = el('span', '', phaseText(active));
     waiting.append(dots, label);
     waiting.hidden = !body.hidden;
-    content.append(waiting);
-    if (active?.message === message) pendingNodes = { body, waiting, label };
+    const trace = teamNode(active?.message === message ? active.steps : [], active?.message === message ? active.step : undefined);
+    content.append(waiting, trace);
+    if (active?.message === message) pendingNodes = { body, waiting, label, trace };
     return row;
   }
   const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'This reply reached the model’s output limit.' : '');
@@ -298,6 +353,7 @@ function messageNode(message, last) {
     else if (message.warning) info.dataset.tone = 'warning';
     content.append(info);
   }
+  if (message.team?.length) content.append(teamNode(message.team));
   const actions = el('div', 'message-actions');
   if (message.text) {
     const control = button('message-action', 'Copy', 'copy', () => copy(message.text, control));
@@ -333,11 +389,16 @@ function refreshStream(job) {
     streamFrame = 0;
     if (active !== job || current !== job.chat || !pendingNodes) return;
     const follow = nearEnd();
-    const { body, waiting, label } = pendingNodes;
+    const { body, waiting, label, trace } = pendingNodes;
     label.textContent = phaseText(job);
     const text = job.message.text;
     body.hidden = !text;
     waiting.hidden = Boolean(text);
+    if (trace) {
+      const parts = teamParts(job.steps ?? [], job.step);
+      trace.replaceChildren(...parts);
+      trace.hidden = !parts.length;
+    }
     if (text) renderMarkdown(body, text, false);
     if (follow) scrollToEnd();
     else syncScroll();
@@ -419,7 +480,7 @@ function tryReply(action) {
   const deep = engine === 'community' && deeper;
   if (retry) {
     reply = current.messages.at(-1);
-    Object.assign(reply, { deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined });
+    Object.assign(reply, { deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined, team: undefined });
   } else {
     drafts.delete(current?.id ?? '');
     if (!current) {
@@ -437,7 +498,7 @@ function tryReply(action) {
 async function generate(chat, message) {
   statusController?.abort();
   const controller = new AbortController();
-  const job = { chat, message, controller };
+  const job = { chat, message, controller, steps: [] };
   active = job;
   const onPhase = (phase, queue) => { job.phase = phase; job.queue = queue; refreshStream(job); };
   const runtime = message.engine === 'community' ? communityEngine({ onPhase, onLimit: showCooldown, onModels(list) {
@@ -453,8 +514,18 @@ async function generate(chat, message) {
   if (!mobile.matches) prompt.focus({ preventScroll: true });
   $('announcer').textContent = 'Frenemy is preparing a reply.';
   try {
+    // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
-      signal: controller.signal, deep: message.deep, onText(text) { message.text = text; refreshStream(job); } });
+      signal: controller.signal, deep: message.deep, mode: message.engine === 'local' ? 'solo' : undefined,
+      onText(text) { message.text = text; refreshStream(job); },
+      onStep(step) {
+        job.step = step;
+        if (step.state === 'done') job.steps.push(step);
+        if (step.state === 'done' && step.role === 'draft' && job.steps.length === 1) {
+          $('announcer').textContent = 'Another model is checking the draft.';
+        }
+        refreshStream(job);
+      } });
     controller.signal.throwIfAborted();
     Object.assign(message, answer, { status: 'complete', warning: answer.warning?.slice(0, 600) });
     $('announcer').textContent = 'Reply ready.';

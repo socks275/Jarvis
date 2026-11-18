@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, newTurn, readChats, saveChats } from '../web/chat.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, newTurn, planAnswer, readChats, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -54,52 +54,110 @@ test('normal chat asks a single model and passes live output through', async () 
   assert.deepEqual(result, { text: 'Good morning.', model: 'one-model' });
 });
 
-test('deeper chat uses draft and review internally and shows only the final answer', async () => {
-  const chat = createChat('hello');
-  newTurn(chat, 'Explain it simply', 'community', true);
-  const calls = [], output = [];
+test('picks the team size from the message: short chat alone, questions in pairs, code as a panel', () => {
+  assert.equal(planAnswer('hi').mode, 'solo');
+  assert.equal(planAnswer('thanks, that helps a lot').mode, 'solo');
+  assert.equal(planAnswer('Explain caching to me?').mode, 'pair');
+  assert.equal(planAnswer('x'.repeat(259)).mode, 'pair');
+  assert.equal(planAnswer('x'.repeat(300)).mode, 'panel');
+  assert.equal(planAnswer('Why does this npm test fail?').mode, 'panel');
+  assert.equal(planAnswer('```js\nconst a = 1;\n```').mode, 'panel');
+  assert.equal(planAnswer('hi', { deep: true }).mode, 'panel');
+});
+
+test('a normal question has one model draft and a second model finish it', async () => {
+  const calls = [], output = [], steps = [];
   const result = await answerChat({
-    messages: conversationContext(chat, 'community'), deep: true, signal: signal(), onText: (text) => output.push(text),
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'Explain caching to me?' }],
+    signal: signal(), onText: (text) => output.push(text), onStep: (step) => steps.push(`${step.role}:${step.state}`),
     generate: async (request) => {
       calls.push(request.purpose);
       if (request.purpose === 'draft') {
-        assert.equal(request.onText, undefined);
-        return { text: 'Draft only', model: 'first-model' };
+        assert.equal(request.preferOtherThan, undefined);
+        assert.equal(typeof request.onText, 'function');
+        request.onText('A draft answer');
+        return { text: 'A draft answer', model: 'first-model' };
       }
+      assert.equal(request.purpose, 'final');
+      assert.equal(request.preferOtherThan, 'first-model');
+      assert.match(request.messages.at(-1).content, /Explain caching to me\?[\s\S]*A draft answer/);
+      request.onText('The finished answer');
+      return { text: 'The finished answer', model: 'second-model' };
+    },
+  });
+  assert.deepEqual(calls, ['draft', 'final']);
+  assert.deepEqual(output, ['A draft answer', 'The finished answer']);
+  assert.deepEqual(steps, ['draft:active', 'draft:done', 'final:active', 'final:done']);
+  assert.equal(result.text, 'The finished answer');
+  assert.deepEqual(result.team, [{ role: 'draft', model: 'first-model' }, { role: 'final', model: 'second-model' }]);
+});
+
+test('a coding question brings in a third model to review before the final answer', async () => {
+  const calls = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why does my npm test fail with this error?' }],
+    signal: signal(),
+    generate: async (request) => {
+      calls.push(request.purpose);
+      if (request.purpose === 'draft') return { text: 'Draft fix', model: 'model-a' };
       if (request.purpose === 'review') {
-        assert.match(request.messages.at(-1).content, /Explain it simply[\s\S]*Draft only/);
-        assert.equal(request.preferOtherThan, 'first-model');
-        assert.equal(request.onText, undefined);
-        return { text: 'Specific correction', model: 'different-model' };
+        assert.equal(request.preferOtherThan, 'model-a');
+        assert.match(request.messages.at(-1).content, /npm test fail[\s\S]*Draft fix/);
+        return { text: 'Check the import', model: 'model-b' };
       }
-      assert.match(request.messages.at(-1).content, /Explain it simply[\s\S]*Draft only[\s\S]*Specific correction/);
-      request.onText('Final answer');
-      return { text: 'Final answer', model: 'final-model' };
+      assert.equal(request.purpose, 'final');
+      assert.deepEqual(request.preferOtherThan, ['model-a', 'model-b']);
+      assert.match(request.messages.at(-1).content, /Draft fix[\s\S]*Check the import/);
+      request.onText('Final fix');
+      return { text: 'Final fix', model: 'model-c' };
     },
   });
   assert.deepEqual(calls, ['draft', 'review', 'final']);
-  assert.deepEqual(output, ['Final answer']);
-  assert.equal(result.text, 'Final answer');
+  assert.deepEqual(result.team.map((step) => step.model), ['model-a', 'model-b', 'model-c']);
+  assert.equal(result.text, 'Final fix');
 });
 
-test('a deeper answer keeps the draft when an extra check fails, but does not continue after Stop', async () => {
-  const messages = [{ role: 'system', content: 'test' }, { role: 'user', content: 'Hello' }];
+test('a local reply stays with one model even for a coding question', async () => {
+  const calls = [];
   const result = await answerChat({
-    messages, deep: true, signal: signal(), generate: async ({ purpose }) => {
-      if (purpose === 'draft') return { text: 'Keep this' };
+    messages: [{ role: 'user', content: 'Why does my npm test fail?' }], signal: signal(), mode: 'solo',
+    generate: async ({ purpose }) => { calls.push(purpose); return { text: 'Local answer', model: 'local-model' }; },
+  });
+  assert.deepEqual(calls, ['answer']);
+  assert.equal(result.team, undefined);
+});
+
+test('a team answer keeps the draft when a later model fails, but does not continue after Stop', async () => {
+  const messages = [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why does my npm test fail?' }];
+  const result = await answerChat({
+    messages, signal: signal(), generate: async ({ purpose }) => {
+      if (purpose === 'draft') return { text: 'Keep this', model: 'model-a' };
       throw new Error('Network busy.');
     },
   });
   assert.equal(result.text, 'Keep this');
-  assert.match(result.warning, /follow-up check couldn’t finish/);
+  assert.match(result.warning, /Showing one model’s draft/);
+  assert.deepEqual(result.team, [{ role: 'draft', model: 'model-a' }]);
   const abort = new AbortController();
   let calls = 0;
-  await assert.rejects(answerChat({ messages, deep: true, signal: abort.signal, generate: async () => {
+  await assert.rejects(answerChat({ messages, signal: abort.signal, generate: async () => {
     calls++;
     abort.abort();
-    return { text: 'Do not continue' };
+    return { text: 'Do not continue', model: 'model-a' };
   } }), { name: 'AbortError' });
   assert.equal(calls, 1);
+});
+
+test('team trails are saved and reloaded, and a malformed trail is not rendered', () => {
+  const storage = fakeStorage();
+  const chat = createChat('Explain caching to me?');
+  const reply = newTurn(chat, 'Explain caching to me?', 'community');
+  Object.assign(reply, { text: 'An answer', status: 'complete', team: [{ role: 'draft', model: 'a' }, { role: 'final', model: 'b' }] });
+  assert.equal(saveChats(storage, [chat]), true);
+  assert.deepEqual(readChats(storage)[0].messages[1].team, [{ role: 'draft', model: 'a' }, { role: 'final', model: 'b' }]);
+  const bad = { ...chat, messages: chat.messages.map((m) => (m.role === 'assistant' ? { ...m, team: [{ role: 'hack' }] } : m)) };
+  storage.setItem(HISTORY_KEY, JSON.stringify([bad]));
+  assert.deepEqual(readChats(storage), []);
 });
 
 test('saved chats are reloadable, sorted and bounded; requests still in progress restore as stopped', () => {
