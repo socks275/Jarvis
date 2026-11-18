@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { embedUrl, findVideo, playRequest, searchUrl, thumbnailUrl, youtubeId } from '../web/youtube.mjs';
+import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, youtubeId } from '../web/youtube.mjs';
 
 test('reads a video id from every common YouTube link', () => {
   assert.equal(youtubeId('play https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
@@ -28,16 +28,23 @@ test('builds embed, thumbnail and search links', () => {
   assert.equal(searchUrl('lofi hip hop'), 'https://www.youtube.com/results?search_query=lofi%20hip%20hop');
 });
 
-test('finds the top result only when a key is supplied', async () => {
-  assert.equal(await findVideo('lofi'), undefined);
-  let called;
-  const found = await findVideo('lofi hip hop', { key: 'KEY', fetchImpl: async (url) => {
-    called = url;
-    return Response.json({ items: [{ id: { videoId: 'dQw4w9WgXcQ' }, snippet: { title: 'Lofi beats' } }] });
+test('finds a video through public instances without any key', async () => {
+  const seen = [];
+  const found = await searchVideo('lofi hip hop', { instances: [{ kind: 'invidious', url: 'https://a.test/s?q=' }], fetchImpl: async (url) => {
+    seen.push(url);
+    return Response.json([{ videoId: 'dQw4w9WgXcQ', title: 'Lofi beats' }, { videoId: 'aaaaaaaaaaa', title: 'Other' }]);
   } });
-  assert.match(called, /^https:\/\/www\.googleapis\.com\/youtube\/v3\/search\?part=snippet&type=video/);
-  assert.match(called, /key=KEY/);
-  assert.match(called, /q=lofi%20hip%20hop/);
+  assert.deepEqual(seen, ['https://a.test/s?q=lofi%20hip%20hop']);
   assert.deepEqual(found, { id: 'dQw4w9WgXcQ', title: 'Lofi beats' });
-  await assert.rejects(findVideo('x', { key: 'K', fetchImpl: async () => new Response('nope', { status: 403 }) }), /403/);
+});
+
+test('falls through broken instances and piped responses', async () => {
+  const instances = [{ kind: 'invidious', url: 'https://down.test/?q=' }, { kind: 'piped', url: 'https://up.test/?q=' }];
+  const found = await searchVideo('jazz', { instances, fetchImpl: async (url) => {
+    if (url.startsWith('https://down.test')) throw new Error('offline');
+    return Response.json({ items: [{ url: '/watch?v=dQw4w9WgXcQ', title: 'Jazz' }] });
+  } });
+  assert.deepEqual(found, { id: 'dQw4w9WgXcQ', title: 'Jazz' });
+  assert.equal(await searchVideo('jazz', { instances, fetchImpl: async () => Response.json({ nope: true }) }), undefined);
+  assert.equal(await searchVideo('   ', { instances: [] }), undefined);
 });

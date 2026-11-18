@@ -237,14 +237,30 @@ body[data-canvas='open'] .dock { padding-right: 0; }
 }
 
 /* Delete a chat straight from the sidebar */
-.history-row { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
-.history-row > .history-button { flex: 1; min-width: 0; }
-.history-delete { display: inline-grid; flex: none; place-items: center; width: 30px; height: 30px; margin-right: 3px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--quiet); background: transparent; opacity: 0; }
-.history-delete .icon { width: 15px; height: 15px; }
-.history-delete:hover:not(:disabled) { border-color: var(--line); color: var(--danger); background: var(--hover); }
-.history-delete:disabled { opacity: 0; }
-.history-row:hover .history-delete, .history-row:focus-within .history-delete { opacity: 1; }
-@media (hover: none) { .history-delete { opacity: 1; } }
+.history-row { position: relative; }
+.history-row-delete > .history-button { padding-right: 38px; }
+.history-delete {
+  position: absolute; top: 50%; right: 5px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 27px; height: 27px; padding: 0;
+  border: 1px solid transparent; border-radius: 9px; color: #c8b6dd;
+  background: linear-gradient(135deg, #2a2338, #221c2e);
+  box-shadow: inset 0 1px 0 #ffffff10, 0 1px 3px #0a071780;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s ease, color .15s ease, border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.history-delete .icon { width: 14px; height: 14px; stroke-width: 1.75; }
+.history-delete:hover:not(:disabled) {
+  color: #ffd3dc; border-color: #6b3541; background: linear-gradient(135deg, #3a2230, #2c1a24);
+  transform: translateY(-50%) scale(1.06);
+}
+.history-delete:active:not(:disabled) { transform: translateY(-50%) scale(.96); }
+.history-delete:focus-visible { opacity: 1; pointer-events: auto; outline-offset: 2px; }
+.history-delete:disabled { display: none; }
+.history-row:hover .history-delete, .history-row:focus-within .history-delete { opacity: 1; pointer-events: auto; }
+.history-row:hover > .history-button:not([aria-current]) { background: var(--hover); }
+@media (hover: none) {
+  .history-delete { opacity: 1; pointer-events: auto; }
+}
 .answer-note { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .answer-note[data-tone='error'], .model-error { color: var(--danger); }
 .answer-note[data-tone='warning'] { padding: 8px 10px; border: 1px solid #55432c; border-radius: 8px; color: #efca96; background: #2a211a; }

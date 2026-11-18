@@ -193,11 +193,7 @@
     </div>
     <div class="settings-box" id="youtube-settings">
       <h3>YouTube</h3>
-      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. With your own YouTube Data API key, Frenemy can also find the top result for a description; without one it opens a YouTube search instead. The key is kept in this browser and sent only to Google.</p>
-      <label class="text-label" for="youtube-key">API key (optional)</label>
-      <input type="password" id="youtube-key" class="text-field" maxlength="120" autocomplete="off" spellcheck="false" placeholder="Paste a YouTube Data API key">
-      <div class="settings-buttons"><button class="button border-button" type="button" id="save-youtube-key">Save key</button><button class="text-action" type="button" id="clear-youtube-key" hidden>Remove key</button></div>
-      <p class="fine-print" id="youtube-key-status" role="status"></p>
+      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Frenemy opens a YouTube search instead.</p>
     </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>

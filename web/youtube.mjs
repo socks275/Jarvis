@@ -44,20 +44,65 @@ export const searchUrl = (query) => `https://www.youtube.com/results?search_quer
 export const embedUrl = (id, { auto = true } = {}) => `https://www.youtube-nocookie.com/embed/${id}`
   + `?rel=0&modestbranding=1${auto ? '&autoplay=1' : ''}`;
 
+// Public front-ends that answer a search without an account or an API key.
+// Each one is tried in turn and the first usable answer wins.
+const INSTANCES = [
+  { kind: 'invidious', url: 'https://inv.nadeko.net/api/v1/search?type=video&q=' },
+  { kind: 'piped', url: 'https://pipedapi.adminforge.de/search?filter=videos&q=' },
+  { kind: 'invidious', url: 'https://yewtu.be/api/v1/search?type=video&q=' },
+];
+const SEARCH_TIMEOUT = 6000;
+const VIDEO_ID = /^[\w-]{11}$/;
+
+function fromInvidious(data) {
+  if (!Array.isArray(data)) return undefined;
+  for (const item of data) {
+    const id = item?.videoId;
+    if (typeof id !== 'string' || !VIDEO_ID.test(id)) continue;
+    const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
+    return { id, ...(title ? { title } : {}) };
+  }
+  return undefined;
+}
+
+function fromPiped(data) {
+  const items = data?.items;
+  if (!Array.isArray(items)) return undefined;
+  for (const item of items) {
+    const id = /(?:v=|\/)([\w-]{11})(?:[&?]|$)/.exec(String(item?.url ?? ''))?.[1];
+    if (!id || !VIDEO_ID.test(id)) continue;
+    const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
+    return { id, ...(title ? { title } : {}) };
+  }
+  return undefined;
+}
+
 /**
- * Looks up the top result with the official API when the reader has supplied a
- * key. Without a key the page falls back to a search link, so nothing breaks.
+ * Finds the first video for a description using public front-ends, so no API
+ * key is needed. Returns undefined when every instance is unavailable, and the
+ * page then offers a plain YouTube search instead.
  */
-export async function findVideo(query, { key, fetchImpl = globalThis.fetch, signal } = {}) {
-  if (!key || !query) return undefined;
-  const url = 'https://www.googleapis.com/youtube/v3/search'
-    + `?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(query)}&key=${encodeURIComponent(key)}`;
-  const response = await fetchImpl(url, { signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
-  if (!response.ok) throw new Error(`YouTube search failed (${response.status}).`);
-  const data = await response.json();
-  const item = data?.items?.[0];
-  const id = item?.id?.videoId;
-  if (typeof id !== 'string' || !/^[\w-]{11}$/.test(id)) return undefined;
-  const title = typeof item?.snippet?.title === 'string' ? item.snippet.title.slice(0, 200) : undefined;
-  return { id, title };
+export async function searchVideo(query, { fetchImpl = globalThis.fetch, signal, instances = INSTANCES, timeout = SEARCH_TIMEOUT } = {}) {
+  const clean = String(query ?? '').trim();
+  if (!clean) return undefined;
+  for (const instance of instances) {
+    if (signal?.aborted) return undefined;
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    signal?.addEventListener('abort', stop, { once: true });
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetchImpl(instance.url + encodeURIComponent(clean), {
+        signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
+      });
+      if (!response.ok) continue;
+      const found = instance.kind === 'piped' ? fromPiped(await response.json()) : fromInvidious(await response.json());
+      if (found) return found;
+    } catch { /* an instance that fails or times out is simply skipped */ }
+    finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+    }
+  }
+  return undefined;
 }

@@ -3,7 +3,7 @@ import { createFormatter } from './format.mjs';
 import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, readChats, saveChats } from './chat.mjs';
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
-import { embedUrl, findVideo, playRequest, searchUrl, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
+import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
 
 const $ = (id) => document.getElementById(id);
 const prompt = $('prompt');
@@ -44,12 +44,9 @@ let desktopSidebar = true;
 let mobileSidebar = false;
 let warnedStorage = false;
 let toastTimer;
-let youtubeKey = '';
 let canvas = { code: '', language: '' };
 let canvasTimer;
 let canvasFocus;
-const YOUTUBE_KEY = 'frenemy-web:youtube-key';
-try { youtubeKey = storage?.getItem(YOUTUBE_KEY) ?? ''; } catch { /* storage may be unavailable */ }
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -132,7 +129,7 @@ function historyButton(chat, search = false) {
     if (search) $('search-dialog').close();
     openChat(chat);
   });
-  const li = el('li', 'history-row');
+  const li = el('li', search ? 'history-row' : 'history-row history-row-delete');
   li.append(node);
   if (!search) {
     const remove = el('button', 'history-delete');
@@ -227,11 +224,6 @@ function paintSettings() {
   $('clear-model').hidden = !localFile;
   $('clear-model').disabled = locked;
   $('clear-chats').disabled = Boolean(active || !chats.length);
-  if (document.activeElement !== $('youtube-key')) $('youtube-key').value = youtubeKey;
-  $('clear-youtube-key').hidden = !youtubeKey;
-  $('youtube-key-status').textContent = youtubeKey
-    ? 'A key is saved in this browser. Descriptions are looked up on YouTube and the first result plays here.'
-    : 'No key saved. Play requests with a link work without one.';
 }
 
 function nearEnd() { return scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 110; }
@@ -380,7 +372,7 @@ function videoCard(video) {
     link.href = searchUrl(video.query);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    meta.append(link, el('small', 'video-hint', 'Add a YouTube API key in Settings to play the top result here.'));
+    meta.append(link, el('small', 'video-hint', 'The video search is unavailable right now, so this opens YouTube instead.'));
   }
   card.append(meta);
   return card;
@@ -676,14 +668,14 @@ async function startPlay(text, play) {
   save();
   paintView(true);
   paintHistory();
-  if (!play.id && youtubeKey) {
+  if (!play.id) {
+    // No key needed: public front-ends answer the search when they can.
     reply.status = 'pending';
     paintView(true);
-    try {
-      const found = await findVideo(play.query, { key: youtubeKey });
-      if (found) Object.assign(reply.video, found);
-    } catch (error) {
-      reply.warning = (error instanceof Error ? error.message : 'YouTube search failed.').slice(0, 200);
+    const found = await searchVideo(play.query).catch(() => undefined);
+    if (found) {
+      reply.video = found;
+      delete reply.warning;
     }
     reply.status = 'complete';
     save();
@@ -840,24 +832,6 @@ $('canvas-source').addEventListener('input', () => {
   clearTimeout(canvasTimer);
   if ($('canvas-preview').hidden) return;
   canvasTimer = setTimeout(renderCanvasPreview, 350);
-});
-$('save-youtube-key').addEventListener('click', () => {
-  const value = $('youtube-key').value.trim();
-  youtubeKey = /^[\w-]{10,120}$/.test(value) ? value : '';
-  try {
-    if (youtubeKey) storage?.setItem(YOUTUBE_KEY, youtubeKey);
-    else storage?.removeItem(YOUTUBE_KEY);
-  } catch { /* storage may be unavailable */ }
-  $('youtube-key').value = youtubeKey;
-  paintSettings();
-  toast(youtubeKey ? 'YouTube key saved in this browser' : value ? 'That does not look like a YouTube key' : 'YouTube key removed');
-});
-$('clear-youtube-key').addEventListener('click', () => {
-  youtubeKey = '';
-  try { storage?.removeItem(YOUTUBE_KEY); } catch { /* storage may be unavailable */ }
-  $('youtube-key').value = '';
-  paintSettings();
-  toast('YouTube key removed');
 });
 prompt.addEventListener('input', () => { sizePrompt(); paintComposer(); });
 prompt.addEventListener('keydown', (event) => {
