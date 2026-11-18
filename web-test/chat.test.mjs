@@ -54,10 +54,15 @@ test('normal chat asks a single model and passes live output through', async () 
   assert.deepEqual(result, { text: 'Good morning.', model: 'one-model' });
 });
 
-test('picks the team size from the message: short chat alone, questions in pairs, code as a panel', () => {
+test('picks the team size from the message: only small talk alone, requests in pairs, code as a panel', () => {
   assert.equal(planAnswer('hi').mode, 'solo');
   assert.equal(planAnswer('thanks, that helps a lot').mode, 'solo');
+  assert.equal(planAnswer('nice!').mode, 'solo');
+  assert.equal(planAnswer('Explain how rainbows form').mode, 'pair');
+  assert.equal(planAnswer('explain gravity').mode, 'pair');
   assert.equal(planAnswer('Explain caching to me?').mode, 'pair');
+  assert.equal(planAnswer('What is a cache').mode, 'pair');
+  assert.equal(planAnswer('tell me about Rome').mode, 'pair');
   assert.equal(planAnswer('x'.repeat(259)).mode, 'pair');
   assert.equal(planAnswer('x'.repeat(300)).mode, 'panel');
   assert.equal(planAnswer('Why does this npm test fail?').mode, 'panel');
