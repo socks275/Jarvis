@@ -3,6 +3,7 @@ import { createFormatter } from './format.mjs';
 import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, readChats, saveChats } from './chat.mjs';
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
+import { embedUrl, findVideo, playRequest, searchUrl, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
 
 const $ = (id) => document.getElementById(id);
 const prompt = $('prompt');
@@ -43,6 +44,12 @@ let desktopSidebar = true;
 let mobileSidebar = false;
 let warnedStorage = false;
 let toastTimer;
+let youtubeKey = '';
+let canvas = { code: '', language: '' };
+let canvasTimer;
+let canvasFocus;
+const YOUTUBE_KEY = 'frenemy-web:youtube-key';
+try { youtubeKey = storage?.getItem(YOUTUBE_KEY) ?? ''; } catch { /* storage may be unavailable */ }
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -125,8 +132,18 @@ function historyButton(chat, search = false) {
     if (search) $('search-dialog').close();
     openChat(chat);
   });
-  const li = el('li');
+  const li = el('li', 'history-row');
   li.append(node);
+  if (!search) {
+    const remove = el('button', 'history-delete');
+    remove.type = 'button';
+    remove.title = 'Delete chat';
+    remove.setAttribute('aria-label', `Delete chat: ${chat.title}`);
+    remove.disabled = active?.chat === chat;
+    remove.append(icon('trash'));
+    remove.addEventListener('click', () => confirmRemove(chat));
+    li.append(remove);
+  }
   return li;
 }
 
@@ -210,6 +227,11 @@ function paintSettings() {
   $('clear-model').hidden = !localFile;
   $('clear-model').disabled = locked;
   $('clear-chats').disabled = Boolean(active || !chats.length);
+  if (document.activeElement !== $('youtube-key')) $('youtube-key').value = youtubeKey;
+  $('clear-youtube-key').hidden = !youtubeKey;
+  $('youtube-key-status').textContent = youtubeKey
+    ? 'A key is saved in this browser. Descriptions are looked up on YouTube and the first result plays here.'
+    : 'No key saved. Play requests with a link work without one.';
 }
 
 function nearEnd() { return scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 110; }
@@ -317,16 +339,136 @@ async function copy(text, control) {
   toast('Copied to clipboard');
 }
 
+function videoCard(video) {
+  const card = el('div', 'video-card');
+  if (video.id) {
+    const frame = el('div', 'video-frame');
+    const poster = el('button', 'video-poster');
+    poster.type = 'button';
+    poster.setAttribute('aria-label', `Play ${video.title || 'video'}`);
+    const image = el('img');
+    image.src = thumbnailUrl(video.id);
+    image.alt = '';
+    image.width = 480;
+    image.height = 270;
+    image.loading = 'lazy';
+    const badge = el('span', 'video-play');
+    badge.append(icon('play'));
+    poster.append(image, badge);
+    poster.addEventListener('click', () => {
+      const player = el('iframe', 'video-player');
+      player.src = embedUrl(video.id);
+      player.title = video.title || 'YouTube video';
+      player.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+      player.allowFullscreen = true;
+      frame.replaceChildren(player);
+      player.focus({ preventScroll: true });
+    });
+    frame.append(poster);
+    card.append(frame);
+  }
+  const meta = el('div', 'video-meta');
+  if (video.title) meta.append(el('strong', 'video-title', video.title));
+  if (video.id) {
+    const link = el('a', 'video-link', 'Open on YouTube');
+    link.href = watchUrl(video.id);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    meta.append(link);
+  } else if (video.query) {
+    const link = el('a', 'video-link', `Search YouTube for “${video.query}”`);
+    link.href = searchUrl(video.query);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    meta.append(link, el('small', 'video-hint', 'Add a YouTube API key in Settings to play the top result here.'));
+  }
+  card.append(meta);
+  return card;
+}
+
+// Preview documents for the canvas. Everything runs in a sandboxed frame, so
+// scripts can't reach this page's storage or the chat.
+function canvasDocument(code, language) {
+  const lang = String(language || '').toLowerCase();
+  if (['html', 'htm', 'svg'].includes(lang)) return code;
+  if (lang === 'css') {
+    return `<!doctype html><html><head><meta charset="utf-8"><style>${code}</style></head><body><main class="demo"><h1>Canvas preview</h1><p>This heading, paragraph and button use the styles you wrote.</p><button>Button</button></main></body></html>`;
+  }
+  if (['js', 'javascript', 'mjs', 'ts', 'typescript', 'jsx', 'tsx'].includes(lang)) {
+    return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#17141f;color:#e8dcf7;font:13px/1.6 ui-monospace,monospace}pre{white-space:pre-wrap;margin:0}</style></head><body><pre id="out"></pre><script>(function(){
+      const out = document.getElementById('out');
+      const line = (...parts) => { out.textContent += parts.map((part) => typeof part === 'string' ? part : (() => { try { return JSON.stringify(part); } catch { return String(part); } })()).join(' ') + '\n'; };
+      console.log = console.info = console.warn = console.error = line;
+      window.addEventListener('error', (event) => line('Error: ' + event.message));
+    })();</script><script>${code.replace(/<\/script/gi, '<\\/script')}</script></body></html>`;
+  }
+  return '';
+}
+
+const canvasName = { html: 'html', htm: 'html', css: 'css', js: 'js', javascript: 'js', mjs: 'js', ts: 'ts', typescript: 'ts', json: 'json', svg: 'svg', python: 'py', bash: 'sh', sh: 'sh' };
+
+function setCanvasTab(tab) {
+  const preview = tab === 'preview';
+  $('canvas-preview-tab').setAttribute('aria-selected', String(preview));
+  $('canvas-code-tab').setAttribute('aria-selected', String(!preview));
+  $('canvas-preview').hidden = !preview;
+  $('canvas-code').hidden = preview;
+}
+
+function renderCanvasPreview() {
+  if (!canvas.code) return;
+  const document_ = canvasDocument($('canvas-source').value, canvas.language);
+  const frame = $('canvas-frame');
+  if (document_) frame.srcdoc = document_;
+}
+
+function openCanvas({ code, language }) {
+  canvas = { code: String(code ?? ''), language: String(language ?? '') };
+  const preview = Boolean(canvasDocument(canvas.code, canvas.language));
+  canvasFocus = document.activeElement;
+  $('canvas').hidden = false;
+  $('canvas-open').hidden = false;
+  document.body.dataset.canvas = 'open';
+  $('canvas-source').value = canvas.code;
+  $('canvas-language').textContent = canvas.language ? canvas.language.toUpperCase() : 'Code';
+  $('canvas-preview-tab').disabled = !preview;
+  $('canvas-code-tab').disabled = false;
+  $('canvas-note').hidden = preview;
+  $('canvas-note').textContent = preview ? '' : 'Preview runs HTML, CSS and JavaScript in your browser. Other languages open here so you can edit, copy or download them.';
+  $('canvas-run').hidden = !preview;
+  if (preview) {
+    renderCanvasPreview();
+    setCanvasTab('preview');
+  } else {
+    $('canvas-frame').removeAttribute('srcdoc');
+    setCanvasTab('code');
+  }
+  $('canvas-close').focus({ preventScroll: true });
+}
+
+function closeCanvas() {
+  if ($('canvas').hidden) return;
+  $('canvas').hidden = true;
+  delete document.body.dataset.canvas;
+  $('canvas-frame').removeAttribute('srcdoc');
+  (canvasFocus instanceof HTMLElement ? canvasFocus : $('canvas-open')).focus({ preventScroll: true });
+}
+
 function renderMarkdown(body, text, withControls) {
   body.innerHTML = format(text);
   if (!withControls) return;
   for (const code of body.querySelectorAll('pre > code')) {
     const pre = code.parentElement;
-    const language = [...code.classList].find((name) => name.startsWith('language-'))?.slice(9) || 'Code';
+    const language = [...code.classList].find((name) => name.startsWith('language-'))?.slice(9) || '';
     const frame = el('div', 'code-frame');
     const bar = el('div', 'code-tools');
-    const control = button('', 'Copy code', '', () => copy(code.textContent, control));
-    bar.append(el('span', '', language), control);
+    const actions = el('div', 'code-actions');
+    const source = code.textContent;
+    const control = button('', 'Copy code', '', () => copy(source, control));
+    const edit = button('', 'Canvas', 'code', () => openCanvas({ code: source, language }));
+    edit.setAttribute('aria-label', 'Open this code in the canvas');
+    actions.append(edit, control);
+    bar.append(el('span', '', language || 'Code'), actions);
     pre.replaceWith(frame);
     frame.append(bar, pre);
   }
@@ -346,6 +488,11 @@ function messageNode(message, last) {
   content.append(el('p', 'assistant-name', 'Frenemy'), body);
   body.hidden = !message.text;
   if (message.text) renderMarkdown(body, message.text, message.status !== 'pending');
+  if (message.video) content.append(videoCard(message.video));
+  else if (message.status === 'complete' && message.text) {
+    const linked = youtubeId(message.text);
+    if (linked) content.append(videoCard({ id: linked }));
+  }
   if (message.status === 'pending') {
     const waiting = el('div', 'thinking');
     const dots = el('span', 'thinking-dots');
@@ -359,7 +506,7 @@ function messageNode(message, last) {
     if (active?.message === message) pendingNodes = { body, waiting, label, trace };
     return row;
   }
-  const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'This reply reached the model’s output limit.' : '');
+  const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'The model ran out of room before it finished. Ask it to continue.' : '');
   if (note) {
     const info = el('p', 'answer-note', note);
     if (message.status === 'error') info.dataset.tone = 'error';
@@ -484,6 +631,11 @@ function tryReply(action) {
   } else {
     try { text = cleanPrompt(prompt.value); } catch { return; }
   }
+  // Playing a video needs no model, so it happens immediately.
+  if (!retry) {
+    const play = playRequest(text);
+    if (play) { startPlay(text, play); return; }
+  }
   if (engine === 'community' && !communityAllowed) {
     consentAction = action;
     $('consent-dialog').showModal();
@@ -506,6 +658,39 @@ function tryReply(action) {
     prompt.value = '';
   }
   generate(current, reply);
+}
+
+async function startPlay(text, play) {
+  drafts.delete(current?.id ?? '');
+  if (!current) {
+    current = createChat(text);
+    chats = [current, ...orderedChats(chats).slice(0, 31)];
+    urlForChat(current);
+  }
+  const reply = newTurn(current, text, engine);
+  prompt.value = '';
+  sizePrompt();
+  paintComposer();
+  Object.assign(reply, { status: 'complete', video: play.id ? { id: play.id } : { query: play.query } });
+  current.updatedAt = Date.now();
+  save();
+  paintView(true);
+  paintHistory();
+  if (!play.id && youtubeKey) {
+    reply.status = 'pending';
+    paintView(true);
+    try {
+      const found = await findVideo(play.query, { key: youtubeKey });
+      if (found) Object.assign(reply.video, found);
+    } catch (error) {
+      reply.warning = (error instanceof Error ? error.message : 'YouTube search failed.').slice(0, 200);
+    }
+    reply.status = 'complete';
+    save();
+    paintView(true);
+    paintHistory();
+  }
+  $('announcer').textContent = play.id ? 'Playing the video.' : 'Finding the video.';
 }
 
 async function generate(chat, message) {
@@ -599,6 +784,11 @@ mobile.addEventListener('change', () => { mobileSidebar = false; paintSidebar();
 window.addEventListener('hashchange', () => openChat(chatFromUrl(), { fromUrl: true, focus: false }));
 document.addEventListener('keydown', (event) => {
   if (event.defaultPrevented) return;
+  if (event.key === 'Escape' && !$('canvas').hidden && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    closeCanvas();
+    return;
+  }
   if (event.key === 'Escape' && mobileSidebar && !document.querySelector('dialog[open]')) setSidebar(false, true);
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !document.querySelector('dialog[open]')) {
     event.preventDefault();
@@ -620,6 +810,55 @@ for (const control of document.querySelectorAll('[data-prompt]')) control.addEve
   prompt.focus();
 });
 $('deep-button').addEventListener('click', () => { deeper = !deeper; paintComposer(); });
+$('canvas-close').addEventListener('click', closeCanvas);
+$('canvas-open').addEventListener('click', () => {
+  if (!$('canvas').hidden) { closeCanvas(); return; }
+  if (!canvas.code) return;
+  canvasFocus = document.activeElement;
+  $('canvas').hidden = false;
+  document.body.dataset.canvas = 'open';
+  setCanvasTab($('canvas-preview-tab').disabled ? 'code' : 'preview');
+  $('canvas-close').focus({ preventScroll: true });
+});
+$('canvas-preview-tab').addEventListener('click', () => { setCanvasTab('preview'); renderCanvasPreview(); });
+$('canvas-code-tab').addEventListener('click', () => setCanvasTab('code'));
+$('canvas-run').addEventListener('click', renderCanvasPreview);
+$('canvas-copy').addEventListener('click', () => copy($('canvas-source').value, $('canvas-copy')));
+$('canvas-download').addEventListener('click', () => {
+  const extension = canvasName[String(canvas.language || '').toLowerCase()] || 'txt';
+  const blob = new Blob([$('canvas-source').value], { type: 'text/plain;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `frenemy-canvas.${extension}`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  toast('Canvas downloaded');
+});
+$('canvas-source').addEventListener('input', () => {
+  clearTimeout(canvasTimer);
+  if ($('canvas-preview').hidden) return;
+  canvasTimer = setTimeout(renderCanvasPreview, 350);
+});
+$('save-youtube-key').addEventListener('click', () => {
+  const value = $('youtube-key').value.trim();
+  youtubeKey = /^[\w-]{10,120}$/.test(value) ? value : '';
+  try {
+    if (youtubeKey) storage?.setItem(YOUTUBE_KEY, youtubeKey);
+    else storage?.removeItem(YOUTUBE_KEY);
+  } catch { /* storage may be unavailable */ }
+  $('youtube-key').value = youtubeKey;
+  paintSettings();
+  toast(youtubeKey ? 'YouTube key saved in this browser' : value ? 'That does not look like a YouTube key' : 'YouTube key removed');
+});
+$('clear-youtube-key').addEventListener('click', () => {
+  youtubeKey = '';
+  try { storage?.removeItem(YOUTUBE_KEY); } catch { /* storage may be unavailable */ }
+  $('youtube-key').value = '';
+  paintSettings();
+  toast('YouTube key removed');
+});
 prompt.addEventListener('input', () => { sizePrompt(); paintComposer(); });
 prompt.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.isComposing || event.keyCode === 229) return;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -157,6 +157,59 @@ test('Think deeper skips the vote and goes straight to the full panel', async ()
     },
   });
   assert.deepEqual(calls, ['draft', 'review', 'final']);
+});
+
+test('a reply cut off at the output limit is continued instead of being left short', async () => {
+  const output = [], calls = [];
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(), onText: (text) => output.push(text),
+    generate: async (request) => {
+      calls.push(request.purpose);
+      if (request.purpose === 'answer') {
+        request.onText('function add(a, b) {\n  retur');
+        return { text: 'function add(a, b) {\n  retur', model: 'model-a', limited: true };
+      }
+      assert.equal(request.purpose, 'continue');
+      assert.match(request.messages.at(-1).content, /Continue exactly where/);
+      assert.equal(request.messages.at(-2).role, 'assistant');
+      request.onText('n a + b;\n}');
+      return { text: 'n a + b;\n}', model: 'model-b' };
+    },
+  });
+  assert.deepEqual(calls, ['answer', 'continue']);
+  assert.equal(result.text, 'function add(a, b) {\n  return a + b;\n}');
+  assert.equal(result.limited, undefined);
+  assert.equal(output.at(-1), result.text);
+});
+
+test('a continuation that restarts the answer does not duplicate it', () => {
+  const head = 'Here is a careful explanation of caching that goes on for a while';
+  assert.equal(joinContinuation(head, head.slice(-40) + ' and then some more'),
+    head + ' and then some more');
+  assert.equal(joinContinuation('abc', ''), 'abc');
+});
+
+test('a failed continuation keeps the part that already streamed', async () => {
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async (request) => {
+      if (request.purpose === 'continue') throw new Error('The network dropped.');
+      return { text: 'Half an answer', model: 'model-a', limited: true };
+    },
+  });
+  assert.equal(result.text, 'Half an answer');
+  assert.equal(result.limited, true);
+});
+
+test('a reply that is still cut off after the extra rounds keeps the limit note', async () => {
+  let calls = 0;
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async () => { calls++; return { text: `part ${calls} `, model: 'model-a', limited: true }; },
+  });
+  assert.equal(calls, 3);
+  assert.equal(result.limited, true);
+  assert.equal(result.text, 'part 1 part 2 part 3 ');
 });
 
 test('a normal question has one model draft and a second model finish it', async () => {

@@ -17,11 +17,19 @@ Open `http://localhost:3000`, type a message, and press **Enter** or the send ar
 
 Frenemy answers with a small team of models, and one model decides the size of that team. It reads your message first and replies with one word: one model for small talk such as a greeting or a quick thanks, two for a question or a request, three for coding, maths or anything risky. The models then work in order: one drafts, the next replies with corrections, and the last gives the finished answer. Each reply names the model that decided and the models that answered, so you can see who drafted, who checked and who finished. If the deciding model can’t be reached, a built-in guess keeps the reply moving. Turn on **Think deeper** to skip the vote and use the full three-model team even for a short question. That takes longer because the models work in sequence. If a later model cannot finish, Frenemy shows the draft with a note. Use **Stop** to cancel a reply or **Try again** to request a new answer to the most recent message. Frenemy respects provider cooldowns and does not automatically resubmit an uncertain request.
 
+## Canvas and video
+
+Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.
+
+Type **play** followed by a YouTube link and the video starts in the chat without asking a model. Type a description instead and Frenemy offers a YouTube search; add your own YouTube Data API key under **Settings → YouTube** and the top result plays inline. YouTube links that appear in an answer get a click-to-play thumbnail. The key is stored in this browser and sent only to Google.
+
+If a model runs out of room part way through an answer, Frenemy asks it to continue and joins the parts, so long code answers finish instead of stopping early. The output-limit note only appears if the reply is still truncated after those extra passes.
+
 ## Privacy and history
 
 Community AI sends your message and recent relevant turns from the same chat to AI Horde and its volunteer workers. When two or three models work on one reply, the draft and the review notes are sent to the models that check and finish it. Don't submit secrets, personal information, or confidential material. See the [AI Horde terms](https://aihorde.net/terms) and [privacy policy](https://aihorde.net/privacy). You can reset permission in Settings; reloading the page also resets it.
 
-Frenemy keeps recent chats in local browser storage when available; they are not encrypted or account-synced. Choose **Chat options** to rename or delete a conversation, or **Settings → Clear all chats** to remove them from this browser. Deleting them locally does not remove data already sent to a provider. Each reply uses a limited window of recent successful turns; start a new chat for a different subject. Existing Frenemy Web runs with usable answers are imported as individual chats.
+Frenemy keeps recent chats in local browser storage when available; they are not encrypted or account-synced. Delete a chat with the trash button beside it in the sidebar, from **Chat options**, or remove everything with **Settings → Clear all chats**. Deleting them locally does not remove data already sent to a provider. Each reply uses a limited window of recent successful turns; start a new chat for a different subject. Existing Frenemy Web runs with usable answers are imported as individual chats.
 
 ### Optional: chat on-device
 

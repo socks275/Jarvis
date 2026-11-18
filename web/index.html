@@ -41,6 +41,10 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12 4 4 9-9"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15m-12.5 0 1 13h8l1-13m-7 0v-3h4v3m-3.5 4v5m3-5v5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 8.5-4 3.5 4 3.5m6-7 4 3.5-4 3.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10.4 8.8 15.5 12l-5.1 3.2V8.8Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10m-4.5-4L12 14.5 16.5 10M5 19h14"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 5h5v5m0-5-7.5 7.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
   </svg>
 
   <a class="skip-link" href="#main">Skip to chat</a>
@@ -83,6 +87,7 @@
         </div>
         <div class="topbar-actions">
           <button type="button" class="engine-pill" data-settings title="Connection settings"><svg class="icon" aria-hidden="true"><use id="top-engine-icon" href="#i-globe"/></svg><span id="top-engine">Community AI</span><svg class="icon engine-chevron" aria-hidden="true"><use href="#i-down"/></svg></button>
+          <button type="button" id="canvas-open" class="icon-button" aria-label="Open canvas" title="Open canvas" hidden><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></button>
           <button type="button" id="chat-options" class="icon-button" aria-label="Chat options" aria-haspopup="dialog" title="Chat options" hidden><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
         </div>
       </header>
@@ -132,6 +137,27 @@
         <button type="button" class="icon-button scroll-latest" id="scroll-latest" aria-label="Scroll to latest message" title="Scroll to latest message" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button>
       </div>
       <footer class="main-footer"><p>AI can make mistakes. Check important information.</p><span aria-hidden="true">·</span><button type="button" class="text-action" id="open-privacy">Privacy</button></footer>
+      <aside class="canvas" id="canvas" aria-label="Canvas" hidden>
+        <div class="canvas-top">
+          <div class="canvas-tabs" role="tablist" aria-label="Canvas view">
+            <button type="button" class="canvas-tab" id="canvas-preview-tab" role="tab" aria-selected="true" aria-controls="canvas-preview">Preview</button>
+            <button type="button" class="canvas-tab" id="canvas-code-tab" role="tab" aria-selected="false" aria-controls="canvas-code">Code</button>
+          </div>
+          <div class="canvas-actions">
+            <button type="button" class="icon-button" id="canvas-copy" aria-label="Copy canvas code" title="Copy code"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg></button>
+            <button type="button" class="icon-button" id="canvas-download" aria-label="Download canvas file" title="Download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></button>
+            <button type="button" class="icon-button" id="canvas-close" aria-label="Close canvas" title="Close canvas"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+        <div class="canvas-preview" id="canvas-preview" role="tabpanel" aria-labelledby="canvas-preview-tab">
+          <iframe id="canvas-frame" title="Canvas preview" sandbox="allow-scripts allow-forms allow-modals allow-popups"></iframe>
+        </div>
+        <div class="canvas-editor" id="canvas-code" role="tabpanel" aria-labelledby="canvas-code-tab" hidden>
+          <textarea id="canvas-source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Canvas code"></textarea>
+        </div>
+        <p class="canvas-note" id="canvas-note" hidden></p>
+        <div class="canvas-foot"><span id="canvas-language">HTML</span><button type="button" class="button border-button" id="canvas-run">Run</button></div>
+      </aside>
     </main>
   </div>
 
@@ -164,6 +190,14 @@
       <p id="model-error" class="model-error" role="alert" hidden></p>
       <div class="settings-buttons"><button class="text-action" type="button" id="clear-model" hidden>Remove selected file</button></div>
       <p class="fine-print">Need a model? <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" target="_blank" rel="noopener noreferrer">Qwen2.5 (491 MB)</a> or <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" target="_blank" rel="noopener noreferrer">SmolLM2 (271 MB)</a>.</p>
+    </div>
+    <div class="settings-box" id="youtube-settings">
+      <h3>YouTube</h3>
+      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. With your own YouTube Data API key, Frenemy can also find the top result for a description; without one it opens a YouTube search instead. The key is kept in this browser and sent only to Google.</p>
+      <label class="text-label" for="youtube-key">API key (optional)</label>
+      <input type="password" id="youtube-key" class="text-field" maxlength="120" autocomplete="off" spellcheck="false" placeholder="Paste a YouTube Data API key">
+      <div class="settings-buttons"><button class="button border-button" type="button" id="save-youtube-key">Save key</button><button class="text-action" type="button" id="clear-youtube-key" hidden>Remove key</button></div>
+      <p class="fine-print" id="youtube-key-status" role="status"></p>
     </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
