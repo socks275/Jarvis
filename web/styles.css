@@ -625,3 +625,30 @@ body {
   @keyframes chorus-pulse { 0%, 100% { box-shadow: inset 0 1px 0 #ffffff14, 0 6px 16px #07050f9c; } 50% { box-shadow: inset 0 1px 0 #ffffff14, 0 0 0 4px #a06bff26, 0 8px 22px #6b3fd166; } }
   @keyframes chorus-glow { 0%, 100% { box-shadow: 0 0 0 0 #a06bff00; } 50% { box-shadow: 0 0 0 3px #a06bff33; } }
 }
+
+/* Connectors: the card in a chat, and the list in Settings */
+.connector-card {
+  margin: 10px 0 4px; max-width: 560px; padding: 12px 14px;
+  border: 1px solid #33294c; border-radius: 14px;
+  background: linear-gradient(150deg, #171325, #100e1a 88%);
+  box-shadow: inset 0 1px 0 #ffffff08;
+}
+.connector-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.connector-badge { padding: 1px 9px; border: 1px solid #4a3a6b; border-radius: 99px; background: #1e1733; color: #d9c6ff; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.connector-title { font-size: 13px; color: var(--ink); }
+.connector-items { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.connector-items li { display: grid; gap: 2px; min-width: 0; }
+.connector-item { color: #e7dcff; font-size: 12.5px; font-weight: 650; overflow-wrap: anywhere; }
+a.connector-item { text-decoration: none; }
+a.connector-item:hover { color: #fff; text-decoration: underline; }
+.connector-detail { color: var(--quiet); font-size: 11px; }
+.connector-note { margin: 8px 0 0; color: var(--quiet); font-size: 11.5px; }
+.connector-error { margin: 0; color: #ffb3c4; font-size: 12px; }
+.connector-list { display: grid; gap: 10px; margin-top: 10px; }
+.connector { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid #2a2340; border-radius: 12px; background: #12101c; }
+.connector-name { font-size: 13px; color: var(--ink); }
+.connector-state { width: 7px; height: 7px; border-radius: 50%; background: #5a5170; }
+.connector-state[data-on='true'] { background: linear-gradient(120deg, var(--iris), var(--aqua)); box-shadow: 0 0 8px #a06bffaa; }
+.connector-status { margin-left: auto; color: var(--quiet); font-size: 11px; }
+.connector .settings-buttons { margin-top: 2px; }
+.connector-example { margin: 0; }

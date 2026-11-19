@@ -25,6 +25,19 @@ Type **play** followed by a YouTube link and the video starts in the chat withou
 
 If a model runs out of room part way through an answer, Chorus asks it to continue and joins the parts, so long code answers finish instead of stopping early. The output-limit note only appears if the reply is still truncated after those extra passes.
 
+## Connectors
+
+Settings → **Connectors** links a chat to the services you already use:
+
+| Connector | What you add | What you can ask |
+| --- | --- | --- |
+| GitHub | a personal access token | “list my GitHub repos”, “GitHub commits in owner/repo”, “my github notifications” |
+| Supabase | project URL and anon key | “Supabase rows from profiles” |
+| Cloudflare | an API token with Zone:Read | “my Cloudflare zones”, “Cloudflare DNS for example.com” |
+| Reddit | nothing | “hot in r/webdev”, “search Reddit for mechanical keyboards” |
+
+A connector only answers when the service is named in the message, so an ordinary question about GitHub still goes to the models. Chorus fetches the data itself, shows it in a card with links, and hands the same rows to the models as context so the reply can talk about them. Keys live in this browser's storage, are sent only to the service they belong to, and are never put in a chat message or sent to a model. Nothing is proxied through a server — each request goes straight from your browser, so a service that blocks cross-origin requests will report an error in the card instead of silently failing.
+
 ## Privacy and history
 
 Community AI sends your message and recent relevant turns from the same chat to AI Horde and its volunteer workers. When two or three models work on one reply, the draft and the review notes are sent to the models that check and finish it. Don't submit secrets, personal information, or confidential material. See the [AI Horde terms](https://aihorde.net/terms) and [privacy policy](https://aihorde.net/privacy). You can reset permission in Settings; reloading the page also resets it.

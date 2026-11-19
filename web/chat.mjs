@@ -73,7 +73,14 @@ export function conversationContext(chat, engine) {
       pairs.push([{ role: 'user', content: user.text }, { role: 'assistant', content: assistant.text }]);
     }
   }
-  return [{ role: 'system', content: INSTRUCTIONS }, ...pairs.slice(-CONTEXT_TURNS).flat(), { role: 'user', content: latest.text }];
+  // A connector puts what it fetched here, so the models can talk about it.
+  const live = typeof latest?.context === 'string' ? latest.context.trim().slice(0, 1800) : '';
+  return [
+    { role: 'system', content: INSTRUCTIONS },
+    ...(live ? [{ role: 'system', content: `Live data fetched for this message from the user's connected account. Use it, and do not invent anything beyond it.\n${live}` }] : []),
+    ...pairs.slice(-CONTEXT_TURNS).flat(),
+    { role: 'user', content: latest.text },
+  ];
 }
 
 // Approximation with headroom; the provider/worker still checks its own tokenizer.

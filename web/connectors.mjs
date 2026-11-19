@@ -1,0 +1,332 @@
+// Connectors let a chat read from services the user already uses. Everything
+// runs in this browser: a key is only ever sent to the service it belongs to,
+// never to a model, and it is never put in a chat message.
+
+export const CONNECTOR_KEY = 'chorus-web:connectors:v1';
+
+export const SERVICES = [
+  {
+    id: 'github',
+    label: 'GitHub',
+    blurb: 'Read your repositories, notifications, issues and commits.',
+    fields: [{ key: 'token', label: 'Personal access token', hint: 'a token with repo and read:user' }],
+    examples: ['list my GitHub repos', 'GitHub commits in owner/repo'],
+  },
+  {
+    id: 'supabase',
+    label: 'Supabase',
+    blurb: 'Read rows from a table in your project.',
+    fields: [
+      { key: 'url', label: 'Project URL', placeholder: 'https://yourproject.supabase.co' },
+      { key: 'key', label: 'Anon key', placeholder: 'the anon public key' },
+    ],
+    examples: ['Supabase rows from profiles'],
+  },
+  {
+    id: 'cloudflare',
+    label: 'Cloudflare',
+    blurb: 'Read your zones and the DNS records inside them.',
+    fields: [{ key: 'token', label: 'API token', hint: 'a token with Zone:Read and DNS:Read' }],
+    examples: ['my Cloudflare zones', 'Cloudflare DNS for example.com'],
+  },
+  {
+    id: 'reddit',
+    label: 'Reddit',
+    blurb: 'Read public subreddits and search. No account or key needed.',
+    fields: [],
+    examples: ['hot in r/webdev', 'search Reddit for mechanical keyboards'],
+  },
+];
+
+const FIELD_LIMIT = 400;
+const CONTEXT_LIMIT = 1800;
+
+const serviceById = new Map(SERVICES.map((service) => [service.id, service]));
+
+export function readConnectors(storage) {
+  const saved = Object.fromEntries(SERVICES.map(({ id }) => [id, {}]));
+  let raw;
+  try { raw = JSON.parse(storage?.getItem?.(CONNECTOR_KEY) ?? 'null'); } catch { return saved; }
+  if (!raw || typeof raw !== 'object') return saved;
+  for (const service of SERVICES) {
+    const entry = raw[service.id];
+    if (!entry || typeof entry !== 'object') continue;
+    const values = {};
+    for (const { key } of service.fields) {
+      const text = typeof entry[key] === 'string' ? entry[key].trim().slice(0, FIELD_LIMIT) : '';
+      if (text) values[key] = text;
+    }
+    if (Object.keys(values).length) saved[service.id] = values;
+  }
+  return saved;
+}
+
+export function writeConnectors(storage, connectors) {
+  try {
+    storage?.setItem?.(CONNECTOR_KEY, JSON.stringify(connectors));
+    return true;
+  } catch { return false; }
+}
+
+export function isConnected(service, connectors) {
+  if (!service.fields.length) return true;
+  return service.fields.every(({ key }) => Boolean(connectors?.[service.id]?.[key]));
+}
+
+const REPO = /\b([\w.-]{1,60}\/[\w.-]{1,60})\b/;
+const TABLE = /\b(?:rows?\s+(?:from|in)|table|from)\s+([a-z][a-z0-9_]{1,59})\b/i;
+const SUBREDDIT = /\br\/([a-z0-9_]{2,30})\b/i;
+const SUBREDDIT_WORD = /\bsubreddit\s+([a-z0-9_]{2,30})\b/i;
+const DOMAIN = /\b((?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|app|co|uk|xyz|me|site|cloud))\b/i;
+
+/**
+ * Reads a short request such as "list my GitHub repos" or "hot in r/webdev".
+ * The service has to be named, so ordinary questions about GitHub or Reddit
+ * still go to the model.
+ */
+export function parseConnectorRequest(text) {
+  const value = String(text ?? '').trim();
+  if (!value || value.length > 320) return undefined;
+  const lower = value.toLowerCase();
+  const repo = REPO.exec(value)?.[1];
+  const table = TABLE.exec(value)?.[1];
+  const subreddit = SUBREDDIT.exec(value)?.[1] ?? SUBREDDIT_WORD.exec(value)?.[1];
+  const domain = DOMAIN.exec(value)?.[1];
+
+  if (/\bgithub\b/.test(lower)) {
+    if (/\b(?:notifications?|inbox)\b/.test(lower)) return { service: 'github', action: 'notifications' };
+    if (repo) {
+      if (/\b(?:issues?|tickets?)\b/.test(lower)) return { service: 'github', action: 'issues', repo };
+      if (/\b(?:pulls?|pull requests?|prs?)\b/.test(lower)) return { service: 'github', action: 'pulls', repo };
+      if (/\bcommits?\b/.test(lower)) return { service: 'github', action: 'commits', repo };
+      if (/\b(?:repo|repository|about|stars?)\b/.test(lower)) return { service: 'github', action: 'repo', repo };
+    }
+    if (/\b(?:repos?|repositories|projects)\b/.test(lower) || /\bmy\s+github\b/.test(lower)) return { service: 'github', action: 'repos' };
+    return undefined;
+  }
+  if (/\bsupabase\b/.test(lower)) {
+    return table ? { service: 'supabase', action: 'rows', table } : { service: 'supabase', action: 'help' };
+  }
+  if (/\bcloudflare\b/.test(lower)) {
+    if (/\b(?:dns|records?)\b/.test(lower) && domain) return { service: 'cloudflare', action: 'dns', zone: domain.toLowerCase() };
+    return { service: 'cloudflare', action: 'zones' };
+  }
+  if (subreddit) return { service: 'reddit', action: 'listing', subreddit: subreddit.toLowerCase() };
+  if (/\breddit\b/.test(lower) && /\b(?:search|find|look\s+up)\b/.test(lower)) {
+    const query = value
+      .replace(/^.*?\breddit\b/i, '')
+      .replace(/^\s*(?:search|find|look\s+up)\b/i, '')
+      .replace(/^\s*(?:for|about)\b/i, '')
+      .replace(/^[\s:,-]+/, '')
+      .trim();
+    if (query) return { service: 'reddit', action: 'search', query: query.slice(0, 120) };
+  }
+  return undefined;
+}
+
+const flat = (value, max = 180) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+function cell(value) {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'object') return flat(JSON.stringify(value), 60);
+  return flat(value, 60);
+}
+
+function credentials(connectors, id) {
+  const service = serviceById.get(id);
+  const saved = connectors?.[id] ?? {};
+  const missing = service.fields.filter(({ key }) => !saved[key]).map(({ label }) => label.toLowerCase());
+  if (missing.length) {
+    throw new Error(`Connect ${service.label} first: Settings → Connectors needs the ${missing.join(' and ')}.`);
+  }
+  return saved;
+}
+
+async function read(response, name) {
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`${name} rejected the key (${response.status}). Update it in Settings → Connectors.`);
+    }
+    if (response.status === 404) throw new Error(`${name} couldn’t find that (404).`);
+    if (response.status === 429) throw new Error(`${name} is rate limiting this browser. Try again in a minute.`);
+    throw new Error(`${name} answered with ${response.status}.`);
+  }
+  return response.json();
+}
+
+async function github(request, connectors, { fetchImpl, signal }) {
+  const { token } = credentials(connectors, 'github');
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  const get = async (path) => read(await fetchImpl(`https://api.github.com${path}`, {
+    headers, credentials: 'omit', signal,
+  }), 'GitHub');
+
+  if (request.action === 'notifications') {
+    const data = await get('/notifications?per_page=8');
+    return {
+      service: 'github', title: 'Your GitHub notifications',
+      items: (Array.isArray(data) ? data : []).map((item) => ({
+        title: flat(item?.subject?.title || 'Notification'),
+        detail: [item?.repository?.full_name, item?.subject?.type, item?.reason].filter(Boolean).join(' · '),
+        url: item?.subject?.url?.replace('api.github.com/repos', 'github.com') ?? undefined,
+      })),
+    };
+  }
+  if (request.action === 'issues' || request.action === 'pulls') {
+    const kind = request.action === 'pulls' ? 'pulls' : 'issues';
+    const data = await get(`/repos/${request.repo}/${kind}?state=open&per_page=8`);
+    return {
+      service: 'github', title: `${kind === 'pulls' ? 'Open pull requests' : 'Open issues'} in ${request.repo}`,
+      items: (Array.isArray(data) ? data : []).map((item) => ({
+        title: flat(item?.title || 'Untitled'),
+        detail: [`#${item?.number}`, item?.user?.login, item?.comments ? `${item.comments} comments` : ''].filter(Boolean).join(' · '),
+        url: item?.html_url ?? undefined,
+      })),
+    };
+  }
+  if (request.action === 'commits') {
+    const data = await get(`/repos/${request.repo}/commits?per_page=8`);
+    return {
+      service: 'github', title: `Latest commits in ${request.repo}`,
+      items: (Array.isArray(data) ? data : []).map((item) => ({
+        title: flat(item?.commit?.message?.split('\n')[0] || 'Commit'),
+        detail: [item?.commit?.author?.name, item?.sha?.slice(0, 7)].filter(Boolean).join(' · '),
+        url: item?.html_url ?? undefined,
+      })),
+    };
+  }
+  if (request.action === 'repo') {
+    const data = await get(`/repos/${request.repo}`);
+    return {
+      service: 'github', title: data?.full_name || request.repo,
+      items: [{
+        title: flat(data?.description || 'No description'),
+        detail: [data?.language, `${data?.stargazers_count ?? 0} stars`, `${data?.open_issues_count ?? 0} open issues`, data?.private ? 'private' : 'public'].filter(Boolean).join(' · '),
+        url: data?.html_url ?? undefined,
+      }],
+    };
+  }
+  const data = await get('/user/repos?per_page=8&sort=updated&affiliation=owner,collaborator,organization_member');
+  return {
+    service: 'github', title: 'Your most recently updated repositories',
+    items: (Array.isArray(data) ? data : []).map((repo) => ({
+      title: repo?.full_name || 'Repository',
+      detail: [repo?.language, `${repo?.stargazers_count ?? 0} stars`, repo?.private ? 'private' : 'public', flat(repo?.description, 90)].filter(Boolean).join(' · '),
+      url: repo?.html_url ?? undefined,
+    })),
+  };
+}
+
+async function supabase(request, connectors, { fetchImpl, signal }) {
+  if (request.action === 'help') {
+    return {
+      service: 'supabase', title: 'Which table should I read?',
+      items: [],
+      note: 'Say it with a table name, for example “Supabase rows from profiles”.',
+    };
+  }
+  const { url, key } = credentials(connectors, 'supabase');
+  const base = url.replace(/\/+$/, '');
+  if (!/^https:\/\/[\w.-]+\.supabase\.co$/.test(base)) {
+    throw new Error('The Supabase project URL should look like https://yourproject.supabase.co');
+  }
+  const rows = await read(await fetchImpl(`${base}/rest/v1/${encodeURIComponent(request.table)}?select=*&limit=10`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+    credentials: 'omit', signal,
+  }), 'Supabase');
+  if (!Array.isArray(rows)) throw new Error('Supabase returned something unexpected for that table.');
+  return {
+    service: 'supabase', title: `Rows from ${request.table}`,
+    items: rows.map((row) => ({
+      title: Object.entries(row ?? {}).slice(0, 4).map(([name, value]) => `${name}: ${cell(value)}`).join(' · ') || 'Empty row',
+      detail: Object.keys(row ?? {}).length > 4 ? `${Object.keys(row).length} columns` : '',
+    })),
+    note: rows.length ? undefined : 'That table is empty, or row level security hides its rows.',
+  };
+}
+
+async function cloudflare(request, connectors, { fetchImpl, signal }) {
+  const { token } = credentials(connectors, 'cloudflare');
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+  const call = async (path) => {
+    const body = await read(await fetchImpl(`https://api.cloudflare.com/client/v4${path}`, {
+      headers, credentials: 'omit', signal,
+    }), 'Cloudflare');
+    if (body?.success === false) throw new Error(`Cloudflare refused that: ${flat(body?.errors?.[0]?.message || 'permission denied', 160)}`);
+    return body?.result;
+  };
+  if (request.action === 'dns') {
+    const zones = await call(`/zones?name=${encodeURIComponent(request.zone)}&per_page=1`);
+    const zone = Array.isArray(zones) ? zones[0] : undefined;
+    if (!zone) throw new Error(`No Cloudflare zone named ${request.zone} is visible to this token.`);
+    const records = await call(`/zones/${zone.id}/dns_records?per_page=20`);
+    return {
+      service: 'cloudflare', title: `DNS records for ${request.zone}`,
+      items: (Array.isArray(records) ? records : []).map((record) => ({
+        title: `${record?.type ?? '?'} ${record?.name ?? ''}`,
+        detail: [record?.content, record?.proxied ? 'proxied' : 'DNS only', `TTL ${record?.ttl ?? 'auto'}`].filter(Boolean).join(' · '),
+      })),
+    };
+  }
+  const zones = await call('/zones?per_page=10');
+  return {
+    service: 'cloudflare', title: 'Your Cloudflare zones',
+    items: (Array.isArray(zones) ? zones : []).map((zone) => ({
+      title: zone?.name || 'Zone',
+      detail: [zone?.status, zone?.plan?.name, zone?.paused ? 'paused' : ''].filter(Boolean).join(' · '),
+    })),
+  };
+}
+
+async function reddit(request, _connectors, { fetchImpl, signal }) {
+  const target = request.action === 'search'
+    ? `https://www.reddit.com/search.json?q=${encodeURIComponent(request.query)}&limit=8&sort=relevance`
+    : `https://www.reddit.com/r/${encodeURIComponent(request.subreddit)}/hot.json?limit=8`;
+  const body = await read(await fetchImpl(target, {
+    headers: { Accept: 'application/json' }, credentials: 'omit', signal,
+  }), 'Reddit');
+  const posts = (body?.data?.children ?? []).map((child) => child?.data).filter(Boolean);
+  return {
+    service: 'reddit',
+    title: request.action === 'search' ? `Reddit search: ${request.query}` : `Hot in r/${request.subreddit}`,
+    items: posts.map((post) => ({
+      title: flat(post?.title || 'Post', 160),
+      detail: [`r/${post?.subreddit}`, `${post?.score ?? 0} points`, `${post?.num_comments ?? 0} comments`].filter(Boolean).join(' · '),
+      url: post?.permalink ? `https://www.reddit.com${post.permalink}` : undefined,
+    })),
+    note: posts.length ? undefined : 'That subreddit is empty or private.',
+  };
+}
+
+/** Runs one parsed request and returns what the chat card should show. */
+export async function runConnector(request, connectors = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  const service = serviceById.get(request?.service);
+  if (!service) throw new Error('That connector isn’t available.');
+  const options = { fetchImpl, signal };
+  try {
+    if (request.service === 'github') return await github(request, connectors, options);
+    if (request.service === 'supabase') return await supabase(request, connectors, options);
+    if (request.service === 'cloudflare') return await cloudflare(request, connectors, options);
+    return await reddit(request, connectors, options);
+  } catch (error) {
+    // A browser reports a blocked cross-origin request as a bare TypeError.
+    if (error instanceof TypeError) {
+      throw new Error(`${service.label} couldn’t be reached from this browser. It may block cross-origin requests, or the connection is down.`);
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`${service.label} answered with something that isn’t JSON.`);
+    }
+    throw error;
+  }
+}
+
+/** Short text handed to the model, so it can talk about what was fetched. */
+export function summarise(result) {
+  if (!result || result.error || !result.items?.length) return '';
+  const lines = result.items.slice(0, 8).map((item) => `- ${item.title}${item.detail ? ` (${item.detail})` : ''}`);
+  return `${result.title}:\n${lines.join('\n')}`.slice(0, CONTEXT_LIMIT);
+}

@@ -8,7 +8,7 @@
   <!-- YouTube refuses to play an embed that arrives without a referrer
        (error 153), so state the policy here instead of inheriting one. -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
@@ -198,6 +198,11 @@
       <h3>YouTube</h3>
       <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Chorus opens a YouTube search instead.</p>
     </div>
+    <div class="settings-box" id="connector-settings">
+      <h3>Connectors</h3>
+      <p>Ask a connected service from a chat, for example “list my GitHub repos” or “hot in r/webdev”. Keys stay in this browser and are only ever sent to the service they belong to — never to a model.</p>
+      <div class="connector-list" id="connector-list"></div>
+    </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
 
@@ -225,6 +230,7 @@
     <h2 id="privacy-title">Chat privacy</h2>
     <p><strong>Community AI.</strong> Your message and relevant recent conversation are sent to <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">AI Horde and its volunteer workers</a>. Don’t share private information.</p>
     <p><strong>On-device.</strong> Your model file and on-device messages aren’t sent to the community service, even if you switch connections later.</p>
+    <p><strong>Connectors.</strong> Keys you add for GitHub, Supabase or Cloudflare stay in this browser and are only sent to that service. They are never included in a message to a model.</p>
     <p><strong>History.</strong> Chats are stored in this browser, not synced to an account. You can delete individual chats or clear them all in Settings. That doesn’t delete data already sent to a provider.</p>
   </dialog>
 

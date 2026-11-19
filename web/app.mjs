@@ -4,6 +4,7 @@ import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orde
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
+import { SERVICES, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors } from './connectors.mjs';
 
 const $ = (id) => document.getElementById(id);
 const prompt = $('prompt');
@@ -22,6 +23,8 @@ const templates = {
 
 let storage;
 try { storage = window.localStorage; } catch { /* some embedded contexts deny storage */ }
+let connectors = readConnectors(storage);
+let connectorRun = false;
 let chats = readChats(storage);
 let current;
 const drafts = new Map();
@@ -171,7 +174,7 @@ function paintConnection() {
 
 const cooling = () => engine === 'community' && retryAt > Date.now();
 const unavailable = () => engine === 'local' && !localFile;
-const blocked = () => Boolean(active || validatingFile || cooling() || unavailable());
+const blocked = () => Boolean(active || validatingFile || connectorRun || cooling() || unavailable());
 
 function paintComposer() {
   const writing = Boolean(active && active.chat === current);
@@ -224,6 +227,50 @@ function paintSettings() {
   $('clear-model').hidden = !localFile;
   $('clear-model').disabled = locked;
   $('clear-chats').disabled = Boolean(active || !chats.length);
+}
+
+function paintConnectors() {
+  const list = $('connector-list');
+  if (!list) return;
+  list.replaceChildren(...SERVICES.map((service) => {
+    const saved = connectors[service.id] ?? {};
+    const on = isConnected(service, connectors);
+    const box = el('section', 'connector');
+    box.dataset.service = service.id;
+    const head = el('div', 'connector-head');
+    const state = el('span', 'connector-state');
+    state.dataset.on = String(on);
+    state.setAttribute('aria-hidden', 'true');
+    head.append(state, el('strong', 'connector-name', service.label));
+    head.append(el('small', 'connector-status', service.fields.length ? (on ? 'Connected' : 'Not connected') : 'Public · no key needed'));
+    box.append(head, el('p', 'fine-print', service.blurb));
+    for (const field of service.fields) {
+      const input = el('input', 'text-field connector-input');
+      input.id = `connector-${service.id}-${field.key}`;
+      input.type = field.key === 'url' ? 'url' : 'password';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.placeholder = field.placeholder ?? field.hint ?? '';
+      input.value = saved[field.key] ?? '';
+      const label = el('label', 'text-label', field.label);
+      label.htmlFor = input.id;
+      box.append(label, input);
+    }
+    if (service.fields.length) {
+      const actions = el('div', 'settings-buttons');
+      const save = el('button', 'button border-button', on ? 'Update' : 'Save');
+      save.type = 'button';
+      save.dataset.connectorSave = service.id;
+      const clear = el('button', 'text-action', 'Remove');
+      clear.type = 'button';
+      clear.hidden = !on;
+      clear.dataset.connectorClear = service.id;
+      actions.append(save, clear);
+      box.append(actions);
+    }
+    box.append(el('p', 'fine-print connector-example', `Try “${service.examples[0]}”`));
+    return box;
+  }));
 }
 
 function nearEnd() { return scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 110; }
@@ -406,6 +453,32 @@ function videoCard(video, { pending = false, onRetry } = {}) {
   return card;
 }
 
+function connectorCard(data) {
+  const card = el('div', 'connector-card');
+  const label = SERVICES.find(({ id }) => id === data.service)?.label ?? 'Connector';
+  const head = el('div', 'connector-head');
+  head.append(el('span', 'connector-badge', label));
+  if (data.title) head.append(el('strong', 'connector-title', data.title));
+  card.append(head);
+  if (data.error) card.append(el('p', 'connector-error', data.error));
+  const list = el('ul', 'connector-items');
+  for (const item of (data.items ?? []).slice(0, 10)) {
+    const row = el('li');
+    const name = el(item.url ? 'a' : 'span', 'connector-item', item.title);
+    if (item.url) {
+      name.href = item.url;
+      name.target = '_blank';
+      name.rel = 'noopener noreferrer';
+    }
+    row.append(name);
+    if (item.detail) row.append(el('small', 'connector-detail', item.detail));
+    list.append(row);
+  }
+  if (list.children.length) card.append(list);
+  if (data.note) card.append(el('p', 'connector-note', data.note));
+  return card;
+}
+
 // Preview documents for the canvas. Everything runs in a sandboxed frame, so
 // scripts can't reach this page's storage or the chat.
 function canvasDocument(code, language) {
@@ -508,6 +581,7 @@ function messageNode(message, last) {
   content.append(el('p', 'assistant-name', 'Chorus'), body);
   body.hidden = !message.text;
   if (message.text) renderMarkdown(body, message.text, message.status !== 'pending');
+  if (message.connector) content.append(connectorCard(message.connector));
   if (message.video) {
     const mine = current?.messages.includes(message);
     content.append(videoCard(message.video, {
@@ -666,6 +740,11 @@ function tryReply(action) {
     $('consent-dialog').showModal();
     return;
   }
+  // A named connector is answered from the service itself, then explained.
+  if (!retry) {
+    const request = parseConnectorRequest(text);
+    if (request) { startConnector(text, request); return; }
+  }
   let reply;
   const deep = engine === 'community' && deeper;
   if (retry) {
@@ -683,6 +762,61 @@ function tryReply(action) {
     prompt.value = '';
   }
   generate(current, reply);
+}
+
+async function startConnector(text, request) {
+  connectorRun = true;
+  try {
+    await runConnectorTurn(text, request);
+  } finally {
+    connectorRun = false;
+    paintComposer();
+  }
+}
+
+async function runConnectorTurn(text, request) {
+  drafts.delete(current?.id ?? '');
+  if (!current) {
+    current = createChat(text);
+    chats = [current, ...orderedChats(chats).slice(0, 31)];
+    urlForChat(current);
+  }
+  const reply = newTurn(current, text, engine, engine === 'community' && deeper);
+  const question = current.messages.at(-2);
+  prompt.value = '';
+  sizePrompt();
+  paintComposer();
+  reply.status = 'pending';
+  current.updatedAt = Date.now();
+  save();
+  paintView(true);
+  paintHistory();
+  $('announcer').textContent = 'Reading from the connector.';
+  let result;
+  try {
+    result = await runConnector(request, connectors);
+  } catch (error) {
+    reply.connector = { service: request.service, error: String(error?.message ?? error).slice(0, 300) };
+    reply.status = 'complete';
+    save();
+    paintView(true);
+    paintHistory();
+    $('announcer').textContent = 'The connector needs attention.';
+    return;
+  }
+  reply.connector = result;
+  question.context = summarise(result);
+  save();
+  paintView(true);
+  paintHistory();
+  if (!question.context) {
+    // Nothing came back, so there is nothing for a model to talk about.
+    reply.status = 'complete';
+    save();
+    paintView(true);
+    return;
+  }
+  await generate(current, reply);
 }
 
 async function startPlay(text, play) {
@@ -889,6 +1023,32 @@ $('reset-permission').addEventListener('click', () => {
   $('check-network').focus();
   toast('Chorus will ask next time you send a community message.');
 });
+$('connector-list').addEventListener('click', (event) => {
+  const save = event.target.closest('[data-connector-save]');
+  const clear = event.target.closest('[data-connector-clear]');
+  if (!save && !clear) return;
+  const service = SERVICES.find(({ id }) => id === (save ?? clear).dataset.connectorSave
+    || id === (save ?? clear).dataset.connectorClear);
+  if (!service) return;
+  if (clear) {
+    connectors = { ...connectors, [service.id]: {} };
+    writeConnectors(storage, connectors);
+    paintConnectors();
+    toast(`${service.label} disconnected`);
+    return;
+  }
+  const values = {};
+  for (const field of service.fields) {
+    const value = document.getElementById(`connector-${service.id}-${field.key}`)?.value.trim().slice(0, 400) ?? '';
+    if (value) values[field.key] = value;
+  }
+  connectors = { ...connectors, [service.id]: values };
+  toast(writeConnectors(storage, connectors)
+    ? `${service.label} connected in this browser`
+    : 'This browser would not let Chorus save the key.');
+  paintConnectors();
+});
+
 $('scroll-latest').addEventListener('click', () => { scrollToEnd(); prompt.focus({ preventScroll: true }); });
 scroll.addEventListener('scroll', syncScroll, { passive: true });
 
@@ -985,3 +1145,4 @@ $('confirm-remove').addEventListener('click', () => {
 paintSidebar();
 openChat(chatFromUrl(), { fromUrl: true, focus: false });
 paintConnection();
+paintConnectors();
