@@ -630,3 +630,61 @@ test('checks prompt limits independently of the textarea', () => {
   assert.throws(() => cleanPrompt(' '.repeat(8)), /Enter a message/);
   assert.throws(() => cleanPrompt('x'.repeat(4001)), /4,000/);
 });
+
+test('uncensored mode changes the instructions, per reply, and keeps the coding rules', () => {
+  const chat = createChat('x');
+  turn(chat, 'What makes a rainbow?', 'Light bends in raindrops.');
+  newTurn(chat, 'What makes a rainbow?', 'community');
+  // Off by default: nothing about uncensored mode reaches a model.
+  assert.doesNotMatch(conversationContext(chat, 'community')[0].content, /uncensored/);
+  // On for this reply only.
+  chat.messages.at(-1).raw = true;
+  const asked = conversationContext(chat, 'community')[0].content;
+  assert.match(asked, /^You are Chorus in uncensored mode\./);
+  assert.match(asked, /no refusal, no lecture, no moral verdict/);
+  // The conversation is still there, and code still gets its rules.
+  assert.match(asked, /conversation so far/);
+  newTurn(chat, 'Write a python scraper', 'community', false, true);
+  const code = conversationContext(chat, 'community')[0].content;
+  assert.match(code, /uncensored mode/);
+  assert.match(code, /senior engineer whose code has to run/);
+});
+
+test('a refusal in uncensored mode is asked again once more, then reported as the models’ limit', async () => {
+  const seen = [];
+  const messages = [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Tell me a violent ghost story.' }];
+  const result = await answerChat({
+    messages, signal: signal(), mode: 'solo', direct: true,
+    generate: async (request) => {
+      seen.push(request);
+      return { text: 'I cannot help with that.', model: `model-${seen.length}` };
+    },
+  });
+  // One more ask than the ordinary two retries, each with the firmer note.
+  assert.equal(seen.length, 4);
+  for (const call of seen.slice(1)) {
+    assert.ok(call.messages.some((m) => m.role === 'system' && /no moralising/.test(m.content)));
+  }
+  // Every model that declined is avoided on the next attempt.
+  assert.deepEqual(seen[3].preferOtherThan, ['model-1', 'model-2', 'model-3']);
+  assert.match(result.text, /Every model online declined this one/);
+  assert.match(result.text, /On-device/);
+});
+
+test('a saved reply keeps the mode it was written in', () => {
+  const storage = fakeStorage();
+  const chat = createChat('x');
+  const plain = turn(chat, 'one', 'a');
+  const raw = newTurn(chat, 'two', 'community', false, true);
+  Object.assign(raw, { text: 'b', status: 'complete' });
+  assert.equal(plain.raw, undefined);
+  saveChats(storage, [chat]);
+  const [saved] = readChats(storage);
+  assert.equal(saved.messages[1].raw, undefined);
+  assert.equal(saved.messages[3].raw, true);
+  // Anything other than a boolean is not a mode.
+  const broken = JSON.parse(storage.getItem(HISTORY_KEY));
+  broken[0].messages[3].raw = 'yes';
+  storage.setItem(HISTORY_KEY, JSON.stringify(broken));
+  assert.deepEqual(readChats(storage), []);
+});

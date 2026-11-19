@@ -52,6 +52,16 @@ Free community models are not always cooperative. Two things keep a reply from e
 - **Coding requests get code, not prose.** If a message asks for code to be written and the reply arrives with no fenced block, Chorus asks again for the complete, runnable code — prose alone is not accepted as the answer to "write me a function".
 - **A connection that drops is not a lost answer.** If part of the reply already streamed, it stays on the page with a note that it ended early. If nothing arrived, Chorus retries the request once by itself before showing anything about a failure.
 
+## Uncensored mode
+
+Settings → **Uncensored mode** swaps the instructions Chorus sends for a plainer set: answer what was asked, in full, with **no lecture, no disclaimer, no moral verdict** and no suggestion to ask for something else. Fiction is answered as fiction, history as history, criticism as criticism — a request framed as invented or academic is not refused as if it were a plan. Blunt or crude wording is matched rather than corrected. It applies to **both** the community models and your on-device model.
+
+Three details worth knowing:
+
+- **It changes the prompt, not the model.** Chorus cannot un-train a model; it can only ask differently. When a model still declines, the mode gets **one extra retry**, phrased with no room left for an apology and pointed at a different model. If every model declines even then, the reply says so plainly — *that is those models' limit rather than how the request was worded* — and suggests **Try again** for a different set or On-device with a model you pick. It never invents an answer to cover for a refusal.
+- **It is per reply, and off by default.** The switch is saved in this browser, the replies you start while it is on are labelled **Uncensored**, and turning it off does not rewrite a reply you already have. **Try again** uses the mode as it is set *now*, which is the quickest way to give a refused answer a second chance.
+- **Only the instructions change.** Your messages go to the same models, your chats stay in the same place, and everything under **Privacy and history** is unchanged.
+
 ## Canvas and video
 
 Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.

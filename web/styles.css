@@ -124,6 +124,9 @@ body[data-sidebar='closed'] .sidebar-toggle { display: inline-flex; }
 .deep-button:hover:not(:disabled) { border-color: #73588d; background: #342745; }
 .deep-button[aria-pressed='true'] { background: #442e5a; color: #f3e2ff; border-color: #8c6eaa; }
 .deep-button:disabled { opacity: .65; }
+.direct-chip[aria-pressed='true'] { background: #4a2436; border-color: #b06a86; color: #ffd9e4; }
+.direct-chip[aria-pressed='true'] .icon { color: #ffb3c8; }
+.direct-chip:hover:not(:disabled) { border-color: #8b5570; }
 .key-hint { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--quiet); }
 .key-hint kbd { padding: 0 4px; line-height: 16px; }
 .send-button { display: inline-grid; align-items: center; justify-items: center; flex: none; width: 41px; height: 41px; border-radius: 11px; padding: 0; border: 1px solid #dbbfff; color: var(--accent-ink); background: linear-gradient(144deg, #e1c7ff, #bf9ef7 78%); box-shadow: 0 2px 9px #100b1c59; }
@@ -317,6 +320,15 @@ body[data-canvas='open'] .dock { padding-right: 0; }
 .engine-option input:focus-visible + .engine-choice, .file-picker:focus-within { outline: 2px solid #ba97fc; outline-offset: 2px; }
 .engine-option input:disabled + .engine-choice { cursor: not-allowed; opacity: .67; }
 .settings-box { margin-top: 11px; background: var(--inset); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 13px; }
+.settings-switch { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.settings-switch strong { font-size: 13px; }
+.settings-switch p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.switch { flex: none; position: relative; width: 42px; height: 24px; margin-top: 2px; padding: 0; border: 1px solid #4d3c5f; border-radius: 999px; background: #2b2237; transition: background .16s ease, border-color .16s ease; }
+.switch span { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #b9a6cb; transition: transform .16s ease, background .16s ease; }
+.switch[aria-checked='true'] { background: #6d3550; border-color: #b06a86; }
+.switch[aria-checked='true'] span { transform: translateX(18px); background: #ffd9e4; }
+.switch:focus-visible { outline: 2px solid #ba97fc; outline-offset: 2px; }
+.switch:disabled { opacity: .6; cursor: not-allowed; }
 .settings-box > p:first-child { margin-top: 0; }
 .settings-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 11px; margin-top: 9px; }
 .settings-buttons .text-action { font-size: 12px; }
