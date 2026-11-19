@@ -17,6 +17,18 @@ Open `http://localhost:3000`, type a message, and press **Enter** or the send ar
 
 Chorus answers with a small team of models, and one model decides the size of that team. It reads your message first and replies with one word: one model for small talk such as a greeting or a quick thanks, two for a question or a request, three for coding, maths or anything risky. The models then work in order: one drafts, the next replies with corrections, and the last gives the finished answer. Each reply names the model that decided and the models that answered, so you can see who drafted, who checked and who finished. If the deciding model can’t be reached, a built-in guess keeps the reply moving. Turn on **Think deeper** to skip the vote and use the full three-model team even for a short question. That takes longer because the models work in sequence. If a later model cannot finish, Chorus shows the draft with a note. A reply that runs out of room is not left half-finished: Chorus asks the same model to carry on, pass after pass, until it stops of its own accord. Use **Stop** to cancel a reply or **Try again** to request a new answer to the most recent message. Chorus respects provider cooldowns and does not automatically resubmit an uncertain request.
 
+## Coding
+
+Code is not a side case. A message that is about code — a language, a library, a bug, a stack trace, a fenced block, or a follow-up in a conversation that was already about code — takes the full three-model panel and gets the code rules:
+
+- **The right models.** AI Horde's roster is ranked by capacity, so a coding task reorders it: models whose names say they were trained for code (Qwen, DeepSeek, Codestral, StarCoder and similar) are offered first, and the roomier contexts break the tie. Capacity still decides among equals, so a busy coder does not win over an idle one.
+- **Written, not improvised.** Sampling temperature drops from 0.55 to 0.2 for code, which is the difference between inventing an API and recalling the real one.
+- **Complete or nothing.** The instructions ask for every import and dependency, no placeholders and no invented functions or flags, the language and versions the user named, the edge cases that actually happen, and the assumptions that had to be made. If an API may have changed, the model is told to say what it is unsure about rather than guess.
+- **A reviewer that looks for breakage.** The checking model is asked specifically for bugs, wrong or invented APIs, missing imports, unhandled edge cases, off-by-one and null mistakes, and anything that would fail to compile or run. The final model then fixes each one and returns runnable code.
+- **Room to finish.** Answers are continued pass after pass until the model stops of their own accord, so a long function is not left mid-line.
+
+Long code answers can be opened in the canvas (**Canvas and video** below) and run from there.
+
 ## Canvas and video
 
 Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.

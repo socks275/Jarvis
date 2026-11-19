@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, isCodeRequest, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -13,6 +13,27 @@ function turn(chat, question, text, engine = 'community', status = 'complete') {
   Object.assign(reply, { text, status });
   return reply;
 }
+
+test('knows when a message is about code', () => {
+  for (const text of ['Why does my npm test fail?', 'fix this python', '```js\nconst a = 1\n```', 'what is a race condition in go', 'refactor this function']) {
+    assert.equal(isCodeRequest(text), true, text);
+  }
+  for (const text of ['hi', 'thanks!', 'what is a rainbow?', 'write a poem about rain']) {
+    assert.equal(isCodeRequest(text), false, text);
+  }
+});
+
+test('a coding message carries the coding rules and the other messages do not', () => {
+  const chat = createChat('x');
+  turn(chat, 'How do I sort a list in python?', 'Use sorted().');
+  newTurn(chat, 'Now make it stable for one key', 'community');
+  assert.match(conversationContext(chat, 'community')[0].content, /senior engineer whose code has to run/);
+
+  const small = createChat('y');
+  turn(small, 'What is a rainbow?', 'Light bending.');
+  newTurn(small, 'And why is it curved?', 'community');
+  assert.doesNotMatch(conversationContext(small, 'community')[0].content, /senior engineer/);
+});
 
 test('a follow-up includes recent messages with user and assistant roles', () => {
   const chat = createChat('Please explain caching.');
@@ -97,6 +118,43 @@ test('every model in a team reads the earlier turns, not only the draft it is gi
   assert.match(seen[2].messages[0].content, /third of three/);
 });
 
+test('a coding task is checked for bugs and finished as runnable code', async () => {
+  const seen = [];
+  const messages = [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Why does my npm test fail with a TypeError?' }];
+  await answerChat({
+    messages, signal: signal(), deep: true,
+    generate: async (request) => {
+      seen.push(request);
+      if (request.purpose === 'draft') return { text: 'draft', model: 'model-a', limited: true };
+      if (request.purpose === 'review') return { text: 'notes', model: 'model-b' };
+      return { text: 'final', model: 'model-c' };
+    },
+  });
+  for (const request of seen) assert.equal(request.code, true, request.purpose);
+  const by = Object.fromEntries(seen.map((r) => [r.purpose, r]));
+  assert.deepEqual(Object.keys(by).sort(), ['continue', 'draft', 'final', 'review']);
+  assert.match(by.review.messages[0].content, /fail to compile or run/);
+  assert.match(by.final.messages[0].content, /complete, runnable code/);
+  // The rules are stated once, not prepended twice.
+  assert.equal((by.final.messages[0].content.match(/rules/g) || []).length, 1);
+});
+
+test('a question that is not about code keeps the ordinary team instructions', async () => {
+  const seen = [];
+  await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Why is the sky blue?' }],
+    signal: signal(), deep: true,
+    generate: async (request) => {
+      seen.push(request);
+      if (request.purpose === 'draft') return { text: 'draft', model: 'model-a' };
+      if (request.purpose === 'review') return { text: 'notes', model: 'model-b' };
+      return { text: 'final', model: 'model-c' };
+    },
+  });
+  assert.equal(seen[0].code, false);
+  assert.doesNotMatch(seen[1].messages[0].content, /fail to compile/);
+});
+
 test('normal chat asks a single model and passes live output through', async () => {
   const emitted = [];
   const result = await answerChat({
@@ -125,6 +183,7 @@ test('picks the team size from the message: only small talk alone, requests in p
   assert.equal(planAnswer('x'.repeat(300)).mode, 'panel');
   assert.equal(planAnswer('Why does this npm test fail?').mode, 'panel');
   assert.equal(planAnswer('```js\nconst a = 1;\n```').mode, 'panel');
+  assert.equal(planAnswer('what is a race condition in go').mode, 'panel');
   assert.equal(planAnswer('hi', { deep: true }).mode, 'panel');
 });
 
