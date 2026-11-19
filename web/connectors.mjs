@@ -29,6 +29,8 @@ export const SERVICES = [
     id: 'supabase',
     label: 'Supabase',
     blurb: 'Read rows from a table in your project.',
+    tokenPage: 'https://supabase.com/dashboard/project/_/settings/api',
+    tokenLabel: 'Open your API settings',
     fields: [
       { key: 'url', label: 'Project URL', placeholder: 'https://yourproject.supabase.co' },
       { key: 'key', label: 'Anon key', placeholder: 'the anon public key' },
@@ -39,6 +41,8 @@ export const SERVICES = [
     id: 'cloudflare',
     label: 'Cloudflare',
     blurb: 'Read your zones and the DNS records inside them.',
+    tokenPage: 'https://dash.cloudflare.com/profile/api-tokens',
+    tokenLabel: 'Create an API token',
     fields: [{ key: 'token', label: 'API token', hint: 'a token with Zone:Read and DNS:Read' }],
     examples: ['my Cloudflare zones', 'Cloudflare DNS for example.com'],
   },

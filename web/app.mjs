@@ -298,11 +298,34 @@ function paintConnectors() {
       input.type = secret ? 'password' : field.key === 'url' ? 'url' : 'text';
       input.autocomplete = 'off';
       input.spellcheck = false;
-      input.placeholder = field.placeholder ?? field.hint ?? '';
-      input.value = saved[field.key] ?? '';
+      input.setAttribute('autocapitalize', 'off');
+      input.setAttribute('autocorrect', 'off');
+      input.dataset.connectorSecret = String(secret);
+      if (secret) {
+        // A saved key is never written back into the page: not in the field,
+        // not in a value attribute, not anywhere the DOM can be read from.
+        input.dataset.lpignore = 'true';
+        input.setAttribute('data-1p-ignore', 'true');
+        input.placeholder = saved[field.key]
+          ? 'Saved in this browser — type a new one to replace it'
+          : field.placeholder ?? field.hint ?? '';
+        input.value = '';
+      } else {
+        input.placeholder = field.placeholder ?? field.hint ?? '';
+        input.value = saved[field.key] ?? '';
+      }
       const label = el('label', 'text-label', field.label);
       label.htmlFor = input.id;
+      if (secret && saved[field.key]) label.append(el('span', 'connector-saved', 'saved'));
       box.append(label, input);
+    }
+    if (service.tokenPage && !service.oauth) {
+      const where = el('a', 'text-action', `Where do I find this? ${service.tokenLabel}`);
+      where.href = service.tokenPage;
+      where.target = '_blank';
+      where.rel = 'noopener noreferrer';
+      where.append(document.createTextNode(''));
+      box.append(where);
     }
     if (service.oauth) {
       const oauthActions = el('div', 'settings-buttons');
@@ -1090,9 +1113,11 @@ $('reset-permission').addEventListener('click', () => {
 function connectorValues(service) {
   const values = { ...(connectors[service.id] ?? {}) };
   for (const field of [...service.fields, ...(service.oauth?.fields ?? [])]) {
+    const secret = field.key === 'token' || field.key === 'key';
     const value = document.getElementById(`connector-${service.id}-${field.key}`)?.value.trim().slice(0, 400) ?? '';
     if (value) values[field.key] = value;
-    else delete values[field.key];
+    // An empty secret field means "keep the saved key"; Remove is how it goes.
+    else if (!secret) delete values[field.key];
   }
   return values;
 }
@@ -1110,6 +1135,13 @@ async function verifyGithub() {
   writeConnectors(storage, connectors);
   paintConnectors();
 }
+
+$('forget-connectors').addEventListener('click', () => {
+  connectors = Object.fromEntries(SERVICES.map(({ id }) => [id, {}]));
+  writeConnectors(storage, connectors);
+  paintConnectors();
+  toast('Every connector key was removed from this browser.');
+});
 
 $('connector-list').addEventListener('click', (event) => {
   if (event.target.closest('[data-oauth-help]')) {
@@ -1145,7 +1177,10 @@ $('connector-list').addEventListener('click', (event) => {
     toast(`${service.label} disconnected`);
     return;
   }
-  connectors = { ...connectors, [service.id]: connectorValues(service) };
+  const next = connectorValues(service);
+  const replaced = service.fields.some(({ key }) => Boolean(next[key])) && next[key] !== connectors[service.id]?.[key];
+  if (replaced) delete next.login, next.avatar;
+  connectors = { ...connectors, [service.id]: next };
   toast(writeConnectors(storage, connectors)
     ? `${service.label} saved in this browser`
     : 'This browser would not let Chorus save the key.');

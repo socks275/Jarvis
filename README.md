@@ -38,6 +38,21 @@ Settings → **Connectors** links a chat to the services you already use:
 
 A connector only answers when the service is named in the message, so an ordinary question about GitHub still goes to the models. Chorus fetches the data itself, shows it in a card with links, and hands the same rows to the models as context so the reply can talk about them. Keys live in this browser's storage, are sent only to the service they belong to, and are never put in a chat message or sent to a model. Nothing is proxied through a server — each request goes straight from your browser, so a service that blocks cross-origin requests will report an error in the card instead of silently failing.
 
+### Where to get the key
+
+- **GitHub** — [github.com/settings/tokens](https://github.com/settings/tokens) → *Generate new token*. A fine-grained token needs **Repository access** (the repos you want) and **Contents: read**; a classic token needs the **repo** and **read:user** scopes. Set an expiry — a week is enough for a try. In Chorus the GitHub card's *Get a token instead* link opens the form with those scopes already ticked.
+- **Supabase** — [Project settings → API](https://supabase.com/dashboard/project/_/settings/api): copy the **Project URL** and the **anon public** key. Never paste the `service_role` key into a page; it bypasses row level security.
+- **Cloudflare** — [Profile → API tokens](https://dash.cloudflare.com/profile/api-tokens) → *Create token* → the *Read all resources* template, or a custom token with **Zone:Read** and **DNS:Read**.
+- **Reddit** — nothing to create.
+
+### Keeping keys private
+
+- A key is saved in this browser's storage and nowhere else. There is no account, no server copy and no sync.
+- Once saved, Chorus never writes it back into the page: the field comes up empty, marked *saved*, so neither a shoulder nor a screen share nor DevTools shows it. Type a new one to replace it, or press **Remove**.
+- It is sent only to the service it belongs to. It is never put into a chat message, never passed to a model (the card's rows are, the key is not), and never logged.
+- **Forget every key** in Settings wipes all of them at once. Clearing site data for the page does the same.
+- Anything you can see in a browser, someone with access to that browser profile can read. On a shared or public machine, use **Forget every key** when you are done, and prefer short-lived tokens.
+
 ### Signing in with OAuth
 
 A pasted token is the quick path, and **Sign in with GitHub** is the real OAuth one. There is one thing that cannot be designed away: GitHub's sign-in endpoints send no CORS headers ([github/isaacs#330](https://github.com/isaacs/github/issues/330)), so a browser is not allowed to swap an OAuth code for a token. The exchange has to happen somewhere that can hold the client secret. That is the relay — deploy it once, and Chorus never sees the secret.
