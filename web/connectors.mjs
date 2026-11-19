@@ -367,6 +367,41 @@ export async function runConnector(request, connectors = {}, { fetchImpl = globa
   }
 }
 
+/**
+ * A harmless request that proves a connector works, so "connected" is something
+ * the user checked rather than something the page assumes.
+ */
+export async function testConnector(id, connectors = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  const options = { fetchImpl, signal };
+  if (id === 'github') {
+    const who = await githubIdentity(credentials(connectors, 'github').token, options);
+    if (!who) throw new Error('GitHub did not accept that token.');
+    return `GitHub works: connected as @${who.login}`;
+  }
+  if (id === 'reddit') {
+    const posts = await reddit({ action: 'listing', subreddit: 'popular' }, connectors, options);
+    return `Reddit works: read ${posts.items.length} posts from r/popular`;
+  }
+  if (id === 'supabase') {
+    const { url, key } = credentials(connectors, 'supabase');
+    const base = url.replace(/\/+$/, '');
+    if (!/^https:\/\/[\w.-]+\.supabase\.co$/.test(base)) {
+      throw new Error('That project URL should look like https://yourproject.supabase.co');
+    }
+    const response = await fetchImpl(`${base}/rest/v1/`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+      credentials: 'omit', signal,
+    });
+    if (!response.ok) throw new Error(`Supabase answered with ${response.status}. Check the URL and the anon key.`);
+    return 'Supabase works: that project answers with that key';
+  }
+  if (id === 'cloudflare') {
+    const zones = await cloudflare({ action: 'zones' }, connectors, options);
+    return `Cloudflare works: ${zones.items.length} zones visible`;
+  }
+  throw new Error('That connector isn’t available.');
+}
+
 /** Short text handed to the model, so it can talk about what was fetched. */
 export function summarise(result) {
   if (!result || result.error || !result.items?.length) return '';

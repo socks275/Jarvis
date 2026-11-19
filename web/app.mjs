@@ -4,7 +4,7 @@ import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orde
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
-import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors } from './connectors.mjs';
+import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, testConnector, writeConnectors } from './connectors.mjs';
 import { OAUTH_STATE_KEY, authorizeUrl, cleanUrl, readCallback, redeemCode } from './oauth.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -352,7 +352,17 @@ function paintConnectors() {
       clear.type = 'button';
       clear.hidden = !on;
       clear.dataset.connectorClear = service.id;
-      actions.append(save, clear);
+      const check = el('button', 'text-action', 'Test');
+      check.type = 'button';
+      check.dataset.connectorTest = service.id;
+      actions.append(save, check, clear);
+      box.append(actions);
+    } else {
+      const actions = el('div', 'settings-buttons');
+      const check = el('button', 'text-action', 'Test');
+      check.type = 'button';
+      check.dataset.connectorTest = service.id;
+      actions.append(check);
       box.append(actions);
     }
     box.append(el('p', 'fine-print connector-example', `Try “${service.examples[0]}”`));
@@ -1143,7 +1153,23 @@ $('forget-connectors').addEventListener('click', () => {
   toast('Every connector key was removed from this browser.');
 });
 
-$('connector-list').addEventListener('click', (event) => {
+$('connector-list').addEventListener('click', async (event) => {
+  const test = event.target.closest('[data-connector-test]');
+  if (test) {
+    const service = SERVICES.find(({ id }) => id === test.dataset.connectorTest);
+    if (!service) return;
+    const probe = { ...connectors, [service.id]: connectorValues(service) };
+    test.disabled = true;
+    toast(`Checking ${service.label}…`);
+    try {
+      toast(await testConnector(service.id, probe));
+    } catch (error) {
+      toast(String(error?.message ?? error).slice(0, 170));
+    } finally {
+      test.disabled = false;
+    }
+    return;
+  }
   if (event.target.closest('[data-oauth-help]')) {
     $('github-setup').showModal();
     return;

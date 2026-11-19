@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CONNECTOR_KEY, SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors,
+  CONNECTOR_KEY, SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise,
+  testConnector, writeConnectors,
 } from '../web/connectors.mjs';
 
 const fakeStorage = () => {
@@ -176,4 +177,30 @@ test('keeps the GitHub avatar only from GitHub itself', async () => {
   assert.deepEqual(fine, { login: 'ada', avatar: 'https://avatars.githubusercontent.com/u/1?v=4' });
   const odd = await githubIdentity('ghp', { fetchImpl: async () => Response.json({ login: 'ada', avatar_url: 'https://evil.test/a.png' }) });
   assert.deepEqual(odd, { login: 'ada' });
+});
+
+test('a test button proves each connector really works', async () => {
+  assert.equal(await testConnector('github', { github: { token: 'ghp' } }, {
+    fetchImpl: async () => Response.json({ login: 'ada' }),
+  }), 'GitHub works: connected as @ada');
+
+  assert.equal(await testConnector('reddit', {}, {
+    fetchImpl: async () => Response.json({ data: { children: [{ data: { title: 'a' } }, { data: { title: 'b' } }] } }),
+  }), 'Reddit works: read 2 posts from r/popular');
+
+  assert.equal(await testConnector('supabase', { supabase: { url: 'https://demo.supabase.co', key: 'anon' } }, {
+    fetchImpl: async (url) => { assert.equal(url, 'https://demo.supabase.co/rest/v1/'); return Response.json({ openapi: '3.0' }); },
+  }), 'Supabase works: that project answers with that key');
+
+  assert.equal(await testConnector('cloudflare', { cloudflare: { token: 'cf' } }, {
+    fetchImpl: async () => Response.json({ success: true, result: [{ name: 'a.com' }, { name: 'b.com' }] }),
+  }), 'Cloudflare works: 2 zones visible');
+
+  await assert.rejects(() => testConnector('github', { github: { token: 'bad' } }, {
+    fetchImpl: async () => new Response('{}', { status: 401 }),
+  }), /GitHub did not accept that token/);
+  await assert.rejects(() => testConnector('supabase', { supabase: { url: 'https://demo.supabase.co', key: 'no' } }, {
+    fetchImpl: async () => new Response('{}', { status: 401 }),
+  }), /Supabase answered with 401/);
+  await assert.rejects(() => testConnector('cloudflare', {}), /Settings → Connectors/);
 });
