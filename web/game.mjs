@@ -6,15 +6,18 @@
 // A game has to be three-dimensional, asked for, and a shooter rather than a
 // design document: "write a shooter game design document" is not a build.
 const THREE_D = /\b(?:3d|3-d|fps|first[- ]person|webgl)\b/i;
-const GAME_HINT = /\b(?:game|shooter|doom|quake|arena|raycast\w*)\b/i;
+const FPS = /\b(?:fps|first[- ]person|shooter|webgl)\b/i;
+const GAME_NOUN = /\b(?:game|arena|level|doom|quake|raycast\w*)\b/i;
 const GAME_ASK = /\b(?:make|build|create|code|write|generate|program|want|need|give)\b/i;
+const NOT_A_BUILD = /\b(?:design document|game design|pitch|essay|explain|why|how does)\b/i;
 
 /** True when the message asks for a 3D game or shooter rather than an answer. */
 export function isGameRequest(text) {
   const prompt = String(text ?? '').trim();
   if (!prompt || prompt.length > 4000) return false;
-  const wants = GAME_ASK.test(prompt) && !/\b(?:design document|game design|pitch|essay about)\b/i.test(prompt);
-  return wants && THREE_D.test(prompt) && GAME_HINT.test(prompt);
+  if (!GAME_ASK.test(prompt) || NOT_A_BUILD.test(prompt)) return false;
+  // "3d fps in a dungeon" is a build request even without the word "game".
+  return THREE_D.test(prompt) && (FPS.test(prompt) || GAME_NOUN.test(prompt));
 }
 
 const THEMES = {
@@ -90,6 +93,35 @@ export const THEME_NAMES = Object.keys(THEMES);
 /** The display name of a theme. */
 export const themeName = (theme) => (THEMES[theme] ?? THEMES.neon).name;
 
+const DEFAULT_OPTIONS = { arena: 26, playerSpeed: 5.4, sprintSpeed: 8.6, enemySpeed: 1.5, waveSize: 2, spread: 1 };
+
+/**
+ * Reads a follow-up such as "add a shotgun" or "make it harder" into engine
+ * options, so a game can be changed without regenerating it.
+ */
+export function gameTweak(text) {
+  const prompt = String(text ?? '').trim();
+  if (!prompt || prompt.length > 160) return null;
+  const tweak = {};
+  if (/\bshotgun|spread shot|double barrel\b/i.test(prompt)) tweak.spread = 3;
+  if (/\btriple shot|burst\b/i.test(prompt)) tweak.spread = 3;
+  if (/\bharder|brutal|nightmare|tougher\b/i.test(prompt)) {
+    tweak.enemySpeed = 2.6; tweak.waveSize = 4; tweak.arena = 22;
+  } else if (/\beasier|casual|gentler|kinder\b/i.test(prompt)) {
+    tweak.enemySpeed = 1.0; tweak.waveSize = 1; tweak.arena = 30;
+  }
+  if (/\bfaster|quicker|speed (?:it|me) up\b/i.test(prompt)) { tweak.playerSpeed = 8; tweak.sprintSpeed = 12; }
+  if (/\bmore enemies|horde|swarm|army\b/i.test(prompt)) tweak.waveSize = 6;
+  if (/\bbigger|larger|wider arena|more space\b/i.test(prompt)) tweak.arena = 36;
+  if (/\bsmaller|tighter|cramped\b/i.test(prompt)) tweak.arena = 18;
+  const theme = pickTheme(prompt);
+  if (theme !== 'neon' || /\bneon\b/i.test(prompt)) tweak.theme = theme;
+  return Object.keys(tweak).length ? tweak : null;
+}
+
+/** Merges a follow-up onto the options a game was built with. */
+export const mergeGameOptions = (base, tweak) => ({ ...DEFAULT_OPTIONS, ...base, ...tweak });
+
 /** Picks a palette from the words in the request, defaulting to neon. */
 export function pickTheme(text) {
   const prompt = String(text ?? '').toLowerCase();
@@ -106,7 +138,11 @@ const num = (values) => values.map((value) => value.toFixed(3)).join(', ');
  * The whole game as one HTML file. The script avoids template literals so the
  * document can be embedded in a template literal here without escaping games.
  */
-export function buildGame(theme = 'neon') {
+export function buildGame(themeOrOptions = 'neon') {
+  const options = typeof themeOrOptions === 'string'
+    ? mergeGameOptions({}, {})
+    : mergeGameOptions(themeOrOptions, {});
+  const theme = typeof themeOrOptions === 'string' ? themeOrOptions : (themeOrOptions.theme ?? 'neon');
   const look = THEMES[theme] ?? THEMES.neon;
   return `<!doctype html>
 <html lang="en">
@@ -343,7 +379,7 @@ export function buildGame(theme = 'neon') {
   gl.cullFace(gl.BACK);
 
   // ---- world --------------------------------------------------------------
-  var ARENA = 26;
+  var ARENA = ${options.arena};
   var boxes = [];
   function addBox(x, z, width, depth, height, color, solid) {
     boxes.push({ x: x, z: z, w: width, d: depth, h: height, color: color, solid: solid !== false });
@@ -414,12 +450,12 @@ export function buildGame(theme = 'neon') {
 
   function spawnWave() {
     wave += 1;
-    var count = 2 + Math.min(8, wave);
+    var count = ${options.waveSize} + Math.min(8, wave);
     for (var i = 0; i < count; i++) {
       var spot = randomSpot();
       enemies.push({
         x: spot.x, z: spot.z, health: 30 + wave * 6, maxHealth: 30 + wave * 6,
-        speed: 1.5 + Math.min(2.4, wave * 0.22), cooldown: 1 + Math.random() * 1.5,
+        speed: ${options.enemySpeed} + Math.min(2.4, wave * 0.22), cooldown: 1 + Math.random() * 1.5,
         bob: Math.random() * Math.PI * 2, size: 0.85 + Math.random() * 0.3
       });
     }
@@ -469,15 +505,19 @@ export function buildGame(theme = 'neon') {
 
   function fire() {
     if (!playing || !player.alive || fireCooldown > 0) return;
-    fireCooldown = 0.14;
-    var cos = Math.cos(player.yaw), sin = Math.sin(player.yaw);
-    var dx = -sin * Math.cos(player.pitch);
-    var dz = -cos * Math.cos(player.pitch);
-    var dy = Math.sin(player.pitch);
-    bullets.push({
-      x: player.x - sin * 0.5, y: player.y - 0.06, z: player.z - cos * 0.5,
-      vx: dx * 42, vy: dy * 42, vz: dz * 42, life: 1.4
-    });
+    fireCooldown = ${options.spread > 1 ? 0.24 : 0.14};
+    var shots = ${options.spread};
+    for (var shot = 0; shot < shots; shot++) {
+      var yaw = player.yaw + (shot - (shots - 1) / 2) * 0.055;
+      var cos = Math.cos(yaw), sin = Math.sin(yaw);
+      var dx = -sin * Math.cos(player.pitch);
+      var dz = -cos * Math.cos(player.pitch);
+      var dy = Math.sin(player.pitch);
+      bullets.push({
+        x: player.x - sin * 0.5, y: player.y - 0.06, z: player.z - cos * 0.5,
+        vx: dx * 42, vy: dy * 42, vz: dz * 42, life: 1.4
+      });
+    }
     blip(660, 0.05, 0.05);
   }
 
@@ -575,7 +615,7 @@ export function buildGame(theme = 'neon') {
     }
     if (!playing || !player.alive) return;
 
-    var speed = (keys.ShiftLeft || keys.ShiftRight ? 8.6 : 5.4) * delta;
+    var speed = (keys.ShiftLeft || keys.ShiftRight ? ${options.sprintSpeed} : ${options.playerSpeed}) * delta;
     var forward = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
     var strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
     var sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);

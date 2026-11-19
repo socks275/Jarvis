@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildGame, isGameRequest, pickTheme, THEME_NAMES, themeName } from '../web/game.mjs';
+import { buildGame, gameTweak, isGameRequest, mergeGameOptions, pickTheme, THEME_NAMES, themeName } from '../web/game.mjs';
 
 test('a request for a 3D game is recognised, and other messages are left alone', () => {
   for (const text of [
@@ -8,6 +8,7 @@ test('a request for a 3D game is recognised, and other messages are left alone',
     'build me a first-person shooter I can play in the browser',
     'code a 3D FPS game',
     'can you make a 3d game with webgl?',
+    'build me a 3d fps in a dungeon',
   ]) assert.equal(isGameRequest(text), true, text);
 
   for (const text of [
@@ -15,6 +16,8 @@ test('a request for a 3D game is recognised, and other messages are left alone',
     'explain how a 3d renderer works',            // a question, not a build request
     'what is the best game engine',
     'write a shooter game design document',       // not 3D
+    'make a 3d model in blender',                 // 3D, but not a game
+    'how does a 3d game engine work',
     '',
   ]) assert.equal(isGameRequest(text), false, text);
 });
@@ -61,4 +64,24 @@ test('a theme changes the palette it is drawn with', () => {
   assert.match(ice, /var SKY = \[0\.060, 0\.090, 0\.130\]/);
   assert.match(neon, /<title>Neon Arena/);
   assert.match(ice, /<title>Frost Line/);
+});
+
+test('a follow-up changes the game instead of describing the change', () => {
+  assert.deepEqual(gameTweak('add a shotgun'), { spread: 3 });
+  assert.equal(gameTweak('make it harder').enemySpeed > 1.5, true);
+  assert.equal(gameTweak('make it easier').enemySpeed < 1.5, true);
+  assert.equal(gameTweak('make the arena bigger').arena > 26, true);
+  assert.equal(gameTweak('change it to a space station').theme, 'space');
+  assert.equal(gameTweak('what is a rainbow?'), null);
+  assert.equal(gameTweak(''), null);
+});
+
+test('the options reach the code the game is built from', () => {
+  const options = mergeGameOptions({ theme: 'space' }, gameTweak('make it harder and add a shotgun'));
+  const html = buildGame(options);
+  const script = html.split('<script>')[1].split('</script>')[0];
+  assert.doesNotThrow(() => new Function(script));
+  assert.match(script, /var ARENA = 22;/);
+  assert.match(script, /var shots = 3;/);
+  assert.match(html, /<title>Orbital Deck/);
 });

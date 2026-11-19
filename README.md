@@ -40,6 +40,8 @@ What you get is a real game, not a demo stub:
 - **Waves of enemies** that chase you, shoot orbs, and take damage from your bullets. Score, a health bar, out-of-the-way health pickups and a death screen are all included, as are short synthesised sounds for firing, hits and damage.
 - **Five looks** chosen from your words: *Neon Arena* (default), *Orbital Deck* (space), *Deep Vault* (dungeon), *Frost Line* (ice) and *Dust Sector* (desert).
 
+Ask for a change and the same game is rebuilt with it: *“add a shotgun”* (a three-shot spread), *“make it harder”*, *“make it easier”*, *“make it faster”*, *“more enemies”*, *“a bigger arena”*, or another theme — *“change it to a space station”*. The existing settings carry over, and the conversation is not given the 26,000-character file, only a short summary of it.
+
 Because the game is assembled here rather than sampled from a model, it is instant, needs no queue, and always runs. This is deliberately narrow: it builds a shooter arena. For anything else, ask normally and the models will write code you can open in the canvas.
 
 ## Canvas and video

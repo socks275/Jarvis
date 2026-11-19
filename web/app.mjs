@@ -4,7 +4,7 @@ import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orde
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
-import { buildGame, isGameRequest, pickTheme, themeName } from './game.mjs';
+import { buildGame, gameTweak, isGameRequest, mergeGameOptions, pickTheme, themeName } from './game.mjs';
 import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, testConnector, writeConnectors } from './connectors.mjs';
 import { OAUTH_STATE_KEY, authorizeUrl, cleanUrl, readCallback, redeemCode } from './oauth.mjs';
 
@@ -853,8 +853,14 @@ function tryReply(action) {
     if (play) { startPlay(text, play); return; }
   }
   // A 3D game is a known build, not a guess: it is assembled here, runs in the
-  // canvas straight away, and needs no queue or model.
-  if (!retry && isGameRequest(text)) { startGame(text); return; }
+  // canvas straight away, and needs no queue or model. A follow-up like "add a
+  // shotgun" rebuilds the same game with the new setting.
+  if (!retry) {
+    const lastGame = [...(current?.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.game);
+    const tweak = lastGame ? gameTweak(text) : null;
+    if (tweak) { startGame(text, { ...lastGame.game.options, ...tweak }); return; }
+    if (isGameRequest(text)) { startGame(text); return; }
+  }
   if (engine === 'community' && !communityAllowed) {
     consentAction = action;
     $('consent-dialog').showModal();
@@ -965,15 +971,17 @@ async function startPlay(text, play) {
 // A complete 3D shooter, written by hand and handed over in one piece. Models
 // on a free network cannot reliably produce a working game in one pass, so the
 // engine lives here and every reply is something that actually runs.
-function startGame(text) {
+function startGame(text, options) {
   drafts.delete(current?.id ?? '');
   if (!current) {
     current = createChat(text);
     chats = [current, ...orderedChats(chats).slice(0, 31)];
     urlForChat(current);
   }
-  const theme = pickTheme(text);
-  const html = buildGame(theme);
+  const settings = options ?? { theme: pickTheme(text) };
+  const theme = settings.theme ?? pickTheme(text);
+  const resolved = mergeGameOptions(settings, { theme });
+  const html = buildGame(resolved);
   const name = themeName(theme);
   const reply = newTurn(current, text, engine);
   prompt.value = '';
@@ -989,7 +997,7 @@ function startGame(text) {
 ${html}
 \`\`\``,
   });
-  reply.game = { theme };
+  reply.game = { theme, options: resolved };
   current.updatedAt = Date.now();
   save();
   paintView(true);
