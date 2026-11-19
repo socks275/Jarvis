@@ -10,7 +10,7 @@ test('preview serves static assets on proxy hosts and not files outside the site
   const dir = await mkdtemp(join(tmpdir(), 'frenemy-serve-test-'));
   const root = join(dir, 'dist');
   await mkdir(root);
-  await writeFile(join(root, 'index.html'), '<title>Frenemy</title>');
+  await writeFile(join(root, 'index.html'), '<title>Chorus</title>');
   await writeFile(join(root, 'app.mjs'), 'export {};');
   await writeFile(join(root, 'engine.wasm'), new Uint8Array([0, 97, 115, 109]));
   await copyFile(new URL('../web/glass-spark-small.webp', import.meta.url), join(root, 'spark.webp'));
@@ -22,7 +22,9 @@ test('preview serves static assets on proxy hosts and not files outside the site
     const home = await fetch(url, { headers: { Host: '3000-test.e2b.app' } });
     assert.equal(home.status, 200);
     assert.equal(home.headers.get('x-frame-options'), null);
-    assert.match(await home.text(), /Frenemy/);
+    // YouTube rejects embeds that arrive with no referrer (error 153).
+    assert.equal(home.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+    assert.match(await home.text(), /Chorus/);
     const script = await fetch(`${url}/app.mjs`);
     assert.match(script.headers.get('content-type'), /javascript/);
     assert.equal(await script.text(), 'export {};');

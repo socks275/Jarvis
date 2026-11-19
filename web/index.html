@@ -3,10 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Frenemy is a free AI chat. Ask questions, write, and explore ideas without a sign-up, API key, or model download.">
-  <meta name="theme-color" content="#111017">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://oai.aihorde.net; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Frenemy — AI Chat</title>
+  <meta name="description" content="Chorus is a free AI chat where several models answer together. Ask questions, write, plan and build — no sign-up, API key or download.">
+  <meta name="theme-color" content="#08070d">
+  <!-- YouTube refuses to play an embed that arrives without a referrer
+       (error 153), so state the policy here instead of inheriting one. -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
@@ -41,6 +44,10 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12 4 4 9-9"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15m-12.5 0 1 13h8l1-13m-7 0v-3h4v3m-3.5 4v5m3-5v5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 8.5-4 3.5 4 3.5m6-7 4 3.5-4 3.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10.4 8.8 15.5 12l-5.1 3.2V8.8Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10m-4.5-4L12 14.5 16.5 10M5 19h14"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 5h5v5m0-5-7.5 7.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
   </svg>
 
   <a class="skip-link" href="#main">Skip to chat</a>
@@ -48,7 +55,7 @@
     <aside class="sidebar" id="sidebar" aria-label="Chat sidebar">
       <div class="sidebar-inner">
         <div class="sidebar-head">
-          <button type="button" id="brand" class="brand" aria-label="Frenemy home"><span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span><span>frenemy<span class="brand-period">.</span></span></button>
+          <button type="button" id="brand" class="brand" aria-label="Chorus home"><span class="brand-icon"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span><span>chorus<span class="brand-period">.</span></span></button>
           <button type="button" id="close-sidebar" class="icon-button sidebar-close" aria-label="Hide sidebar" title="Hide sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
         </div>
         <div class="sidebar-actions">
@@ -83,6 +90,7 @@
         </div>
         <div class="topbar-actions">
           <button type="button" class="engine-pill" data-settings title="Connection settings"><svg class="icon" aria-hidden="true"><use id="top-engine-icon" href="#i-globe"/></svg><span id="top-engine">Community AI</span><svg class="icon engine-chevron" aria-hidden="true"><use href="#i-down"/></svg></button>
+          <button type="button" id="canvas-open" class="icon-button" aria-label="Open canvas" title="Open canvas" hidden><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></button>
           <button type="button" id="chat-options" class="icon-button" aria-label="Chat options" aria-haspopup="dialog" title="Chat options" hidden><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
         </div>
       </header>
@@ -94,18 +102,18 @@
               <img src="./glass-spark.webp" srcset="./glass-spark-small.webp 480w, ./glass-spark.webp 920w" sizes="(max-width: 540px) 200px, (max-width: 1050px) 373px, 424px" alt="" width="920" height="920" fetchpriority="high">
             </div>
             <div class="hero-copy">
-              <p class="welcome-kicker"><span></span> Frenemy AI</p>
+              <p class="welcome-kicker"><span></span> Chorus · many models, one answer</p>
               <h1 id="welcome-title">What’s on <em>your mind?</em></h1>
-              <p class="welcome-description">Ask a question, explore an idea, or get unstuck.</p>
+              <p class="welcome-description">Ask anything. Chorus picks the right models, lets them check each other, and gives you one answer.</p>
             </div>
           </div>
           <div id="welcome-composer" class="welcome-composer">
             <section class="composer-group" id="composer" aria-label="Message composer">
               <div class="composer-box">
-                <label for="prompt" class="sr-only">Message Frenemy</label>
-                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Frenemy anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
+                <label for="prompt" class="sr-only">Message Chorus</label>
+                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
                 <div class="composer-controls">
-                  <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Ask for an extra check before the answer. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
+                  <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
                   <span class="composer-spacer"></span>
                   <span class="key-hint" aria-hidden="true"><kbd>↵</kbd> Enter to send</span>
                   <button type="button" id="send-button" class="send-button" aria-label="Send message" title="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
@@ -132,19 +140,40 @@
         <button type="button" class="icon-button scroll-latest" id="scroll-latest" aria-label="Scroll to latest message" title="Scroll to latest message" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button>
       </div>
       <footer class="main-footer"><p>AI can make mistakes. Check important information.</p><span aria-hidden="true">·</span><button type="button" class="text-action" id="open-privacy">Privacy</button></footer>
+      <aside class="canvas" id="canvas" aria-label="Canvas" hidden>
+        <div class="canvas-top">
+          <div class="canvas-tabs" role="tablist" aria-label="Canvas view">
+            <button type="button" class="canvas-tab" id="canvas-preview-tab" role="tab" aria-selected="true" aria-controls="canvas-preview">Preview</button>
+            <button type="button" class="canvas-tab" id="canvas-code-tab" role="tab" aria-selected="false" aria-controls="canvas-code">Code</button>
+          </div>
+          <div class="canvas-actions">
+            <button type="button" class="icon-button" id="canvas-copy" aria-label="Copy canvas code" title="Copy code"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg></button>
+            <button type="button" class="icon-button" id="canvas-download" aria-label="Download canvas file" title="Download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></button>
+            <button type="button" class="icon-button" id="canvas-close" aria-label="Close canvas" title="Close canvas"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+        <div class="canvas-preview" id="canvas-preview" role="tabpanel" aria-labelledby="canvas-preview-tab">
+          <iframe id="canvas-frame" title="Canvas preview" sandbox="allow-scripts allow-forms allow-modals allow-popups"></iframe>
+        </div>
+        <div class="canvas-editor" id="canvas-code" role="tabpanel" aria-labelledby="canvas-code-tab" hidden>
+          <textarea id="canvas-source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Canvas code"></textarea>
+        </div>
+        <p class="canvas-note" id="canvas-note" hidden></p>
+        <div class="canvas-foot"><span id="canvas-language">HTML</span><button type="button" class="button border-button" id="canvas-run">Run</button></div>
+      </aside>
     </main>
   </div>
 
   <dialog class="dialog" id="consent-dialog" aria-labelledby="consent-title">
     <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close community notice"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <h2 id="consent-title">Chat with Community AI</h2>
-    <p>Your message and relevant recent conversation go to AI Horde and its volunteer workers. Think deeper can also share draft answers. Don’t include personal information, passwords, or anything confidential.</p>
+    <p>Your message and relevant recent conversation go to AI Horde and its volunteer workers. A draft answer is shared with the other models that check and finish it. Don’t include personal information, passwords, or anything confidential.</p>
     <p class="fine-print">By continuing you confirm you’re over 13 and accept AI Horde’s <a href="https://aihorde.net/terms" target="_blank" rel="noopener noreferrer">terms</a> and <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a>. Your permission lasts for this page session.</p>
     <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" class="button primary" id="accept-community">Accept and send</button></div>
   </dialog>
 
   <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
-    <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Frenemy answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Chorus answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <fieldset class="engine-options" id="engine-options">
       <legend>AI connection</legend>
       <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
@@ -152,7 +181,8 @@
     </fieldset>
     <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
-      <p>Frenemy uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
+      <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
+      <p>One model reads each message first and decides how many models should answer: one for small talk, two for a question, three for code or tricky work. The reply names the model that decided and the models that answered.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
@@ -163,6 +193,17 @@
       <p id="model-error" class="model-error" role="alert" hidden></p>
       <div class="settings-buttons"><button class="text-action" type="button" id="clear-model" hidden>Remove selected file</button></div>
       <p class="fine-print">Need a model? <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" target="_blank" rel="noopener noreferrer">Qwen2.5 (491 MB)</a> or <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" target="_blank" rel="noopener noreferrer">SmolLM2 (271 MB)</a>.</p>
+    </div>
+    <div class="settings-box" id="youtube-settings">
+      <h3>YouTube</h3>
+      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Chorus opens a YouTube search instead.</p>
+    </div>
+    <div class="settings-box" id="connector-settings">
+      <h3>Connectors</h3>
+      <p>Ask a connected service from a chat, for example “list my GitHub repos” or “hot in r/webdev”. Keys stay in this browser and are only ever sent to the service they belong to — never to a model.</p>
+      <div class="connector-list" id="connector-list"></div>
+      <p class="fine-print">A key is stored in this browser only. It is never shown again after saving, never put in a chat message, and never sent to a model — only to the service it belongs to.</p>
+      <div class="settings-buttons"><button type="button" class="text-action danger-text" id="forget-connectors">Forget every key</button></div>
     </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
@@ -180,6 +221,19 @@
     <div class="dialog-actions split"><button type="button" class="button border-button danger-text" id="delete-chat"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete chat</button><button type="button" class="button primary" id="save-title">Save title</button></div>
   </dialog>
 
+  <dialog class="dialog" id="github-setup" aria-labelledby="github-setup-title">
+    <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close GitHub sign-in help" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <h2 id="github-setup-title">How GitHub sign-in works</h2>
+    <p>A page cannot swap a GitHub code for a token: the exchange needs your OAuth app's secret, and GitHub's sign-in endpoint refuses browser calls. So one small relay holds the secret, and Chorus talks only to it.</p>
+    <ol class="setup-steps">
+      <li><a href="https://github.com/settings/developers" target="_blank" rel="noopener noreferrer">Create an OAuth App</a> in your GitHub account and set its callback to this page's address.</li>
+      <li><a href="https://deploy.workers.cloudflare.com/?url=https://github.com/socks275/Jarvis/tree/main/relay" target="_blank" rel="noopener noreferrer">Deploy the relay</a>, then set <code>GITHUB_CLIENT_ID</code>, <code>GITHUB_CLIENT_SECRET</code> and <code>ALLOWED_ORIGIN</code>.</li>
+      <li>Paste the client ID and the relay address below, then press <strong>Sign in with GitHub</strong>.</li>
+    </ol>
+    <p class="fine-print">The secret stays in the relay, never here. And if you would rather not set this up, a personal access token uses the same connector.</p>
+    <div class="dialog-actions"><button type="button" class="button primary" data-close>Got it</button></div>
+  </dialog>
+
   <dialog class="dialog" id="remove-dialog" aria-labelledby="remove-title">
     <div class="dialog-top"><h2 id="remove-title">Delete chat?</h2><button type="button" class="icon-button" data-close aria-label="Close delete confirmation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <p id="remove-description">This permanently removes the chat from this browser.</p>
@@ -191,11 +245,12 @@
     <h2 id="privacy-title">Chat privacy</h2>
     <p><strong>Community AI.</strong> Your message and relevant recent conversation are sent to <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">AI Horde and its volunteer workers</a>. Don’t share private information.</p>
     <p><strong>On-device.</strong> Your model file and on-device messages aren’t sent to the community service, even if you switch connections later.</p>
+    <p><strong>Connectors.</strong> Keys you add for GitHub, Supabase or Cloudflare stay in this browser and are only sent to that service. They are never included in a message to a model.</p>
     <p><strong>History.</strong> Chats are stored in this browser, not synced to an account. You can delete individual chats or clear them all in Settings. That doesn’t delete data already sent to a provider.</p>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
   <p id="announcer" class="sr-only" role="status"></p>
-  <noscript><div class="no-script">Enable JavaScript to use Frenemy chat.</div></noscript>
+  <noscript><div class="no-script">Enable JavaScript to use Chorus chat.</div></noscript>
 </body>
 </html>

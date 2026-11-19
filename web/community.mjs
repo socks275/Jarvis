@@ -3,9 +3,13 @@ import { estimateTokens, OUTPUT_LIMIT, shorterContext } from './chat.mjs';
 const API = 'https://oai.aihorde.net/v1';
 const MAX_CANDIDATES = 5;
 const FREE_TOKENS = 512; // The documented default free floor includes thinking tokens.
+const ANSWER_TOKENS = 1024; // Long code answers need room; the model's own limit still applies.
 const MIN_TOKENS = 64;
 const DISCOVERY_TIMEOUT = 12_000;
 const RESPONSE_TIMEOUT = 150_000;
+// The decider only needs one word, so it must not stall the reply for a full queue wait.
+const TRIAGE_TIMEOUT = 45_000;
+const TRIAGE_TOKENS = 64;
 
 function waitSeconds(value) {
   if (!value) return 0;
@@ -14,10 +18,11 @@ function waitSeconds(value) {
 }
 
 class CommunityError extends Error {
-  constructor(message, { refresh = false, retryAfter = 0 } = {}) {
+  constructor(message, { refresh = false, retryAfter = 0, smaller = false } = {}) {
     super(message);
     this.refresh = refresh;
     this.retryAfter = retryAfter;
+    this.smaller = smaller;
   }
 }
 
@@ -32,6 +37,7 @@ function providerError(response, payload) {
   } else if (code === 'no_eligible_worker' || code === 'no_worker_supports_limit') {
     message = `No online model could handle this message.${wait} A shorter message may help.`;
   } else if (code === 'KudosUpfront' || status === 402) {
+    // Anonymous requests can be refused for asking for too many tokens; retry smaller once.
     message = 'This message exceeds the network’s current free allowance. Try a shorter message.';
   } else if (status === 401 || status === 403) {
     message = 'AI Horde isn’t accepting this anonymous request. No account or key was sent.';
@@ -45,7 +51,8 @@ function providerError(response, payload) {
   // Only refresh on a documented pre-queue model refusal. Do not duplicate jobs after a timeout or disconnect.
   const refresh = status === 404 && ['UnknownChatModel', 'model_not_found'].includes(code)
     && !retryAfter && headers.get('x-should-retry') !== 'false';
-  return new CommunityError(message, { refresh, retryAfter });
+  const smaller = status === 402 || ['KudosUpfront', 'KudosUpfrontRequired'].includes(code);
+  return new CommunityError(message, { refresh, retryAfter, smaller });
 }
 
 function queueInfo(line) {
@@ -132,7 +139,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
   try {
     const response = await fetchImpl(API + path, {
       method: body ? 'POST' : 'GET',
-      ...(body ? { headers: { 'Content-Type': 'application/json', 'X-Title': 'Frenemy Web' }, body: JSON.stringify(body) } : {}),
+      ...(body ? { headers: { 'Content-Type': 'application/json', 'X-Title': 'Chorus Web' }, body: JSON.stringify(body) } : {}),
       cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: connection.signal,
     });
     if (response.ok && body && response.headers.get('Content-Type')?.includes('text/event-stream')) {
@@ -179,7 +186,7 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
 
 export function planCommunityRequest(models, { messages, purpose, preferOtherThan }) {
   if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
-  const desired = purpose === 'review' ? 352 : FREE_TOKENS;
+  const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
   let reduced;
   for (let context = messages; ; context = shorterContext(context)) {
     const input = estimateTokens(context);
@@ -194,7 +201,10 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
   throw new CommunityError('The models online right now cannot fit this message. Try shortening it or start a new chat.');
 
   function body(fitting, context) {
-    const others = preferOtherThan ? fitting.filter((m) => m.id !== preferOtherThan) : [];
+    // One or more earlier models to avoid, so a check or a final pass really is
+    // written by a different model than the draft it is working from.
+    const avoid = preferOtherThan ? [].concat(preferOtherThan) : [];
+    const others = avoid.length ? fitting.filter((m) => !avoid.includes(m.id)) : [];
     const candidates = (others.length ? others : fitting).slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
@@ -213,10 +223,18 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
         onModels(models);
         return planCommunityRequest(models, { messages, purpose, preferOtherThan });
       };
-      const complete = (body) => {
+      const complete = async (body) => {
         onPhase('waiting');
-        return request('/chat/completions', { body, fetchImpl, signal, timeout: RESPONSE_TIMEOUT, onText,
-          onQueue: (queue) => onPhase('waiting', queue) });
+        const timeout = purpose === 'triage' ? TRIAGE_TIMEOUT : RESPONSE_TIMEOUT;
+        const send = (size) => request('/chat/completions', { body: { ...body, max_tokens: size }, fetchImpl, signal, timeout,
+          onText, onQueue: (queue) => onPhase('waiting', queue) });
+        try {
+          return await send(body.max_tokens);
+        } catch (error) {
+          // Too big for the free allowance: one smaller attempt still beats no answer.
+          if (error?.smaller && body.max_tokens > FREE_TOKENS) return await send(FREE_TOKENS);
+          throw error;
+        }
       };
       try {
         const first = await plan();

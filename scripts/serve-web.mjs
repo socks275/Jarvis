@@ -20,7 +20,9 @@ export function staticSite(directory) {
   const root = resolve(directory);
   return createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
+    // strict-origin: only the origin is sent cross-site. YouTube rejects an
+    // embed that arrives with no referrer at all (error 153).
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { Allow: 'GET, HEAD' }).end();
       return;
@@ -56,6 +58,6 @@ export function staticSite(directory) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3000);
   staticSite(fileURLToPath(new URL('../dist/', import.meta.url))).listen(port, '0.0.0.0', () => {
-    console.log(`Frenemy Web listening on port ${port}`);
+    console.log(`Chorus Web listening on port ${port}`);
   });
 }

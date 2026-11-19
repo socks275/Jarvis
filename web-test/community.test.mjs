@@ -45,12 +45,35 @@ test('selects at most five compatible models, respects the free limit and prefer
   const request = planCommunityRequest(models, { messages, purpose: 'answer' });
   assert.equal(request.models.length, 5);
   assert.ok(!request.models.includes('tiny-context'));
-  assert.equal(request.max_tokens, 512);
+  assert.equal(request.max_tokens, 1024);
   assert.equal(request.stream, true);
   assert.equal(request.horde.include_reasoning, false);
   const review = planCommunityRequest(models, { messages, purpose: 'review', preferOtherThan: 'model-0' });
   assert.ok(!review.models.includes('model-0'));
   assert.equal(review.max_tokens, 352);
+});
+
+test('a final pass avoids every model that already worked on the reply', async () => {
+  const models = await getOnlineModels({ fetchImpl: async () => list(card('model-a'), card('model-b'), card('model-c')) });
+  const request = planCommunityRequest(models, { messages, purpose: 'final', preferOtherThan: ['model-a', 'model-b'] });
+  assert.deepEqual(request.models, ['model-c']);
+  assert.equal(request.max_tokens, 1024);
+});
+
+test('a model that offers fewer tokens is still respected, and a free-tier refusal retries smaller', async () => {
+  const limited = await getOnlineModels({ fetchImpl: async () => list(card('capped', { max: 512 })) });
+  assert.equal(planCommunityRequest(limited, { messages, purpose: 'answer' }).max_tokens, 512);
+  const sizes = [];
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('worker/A'));
+    const body = JSON.parse(options.body);
+    sizes.push(body.max_tokens);
+    if (body.max_tokens > 512) return refusal('KudosUpfront', 402);
+    return stream([event({ model: 'worker/A', choices: [{ delta: { content: 'Shorter answer' } }] }), event({ model: 'worker/A', choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+  } });
+  const result = await generate({ messages, purpose: 'answer', signal: signal() });
+  assert.deepEqual(sizes, [1024, 512]);
+  assert.equal(result.text, 'Shorter answer');
 });
 
 test('only complete older turns are removed when resizing conversation context', () => {
@@ -73,7 +96,7 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
     assert.equal(options.method, 'POST');
     assert.equal(options.credentials, 'omit');
     assert.equal(new Headers(options.headers).has('Authorization'), false);
-    assert.equal(options.headers['X-Title'], 'Frenemy Web');
+    assert.equal(options.headers['X-Title'], 'Chorus Web');
     assert.deepEqual(JSON.parse(options.body).messages, messages);
     return stream([
       ': horde queue_position=7 wait_time=42\r\n\r\n',
