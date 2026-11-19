@@ -31,6 +31,7 @@ let chats = readChats(storage);
 let current;
 const drafts = new Map();
 let active;
+let retryLater;
 let pendingNodes;
 let streamFrame = 0;
 let engine = 'community';
@@ -1021,6 +1022,7 @@ async function findVideo(reply) {
 }
 
 async function generate(chat, message) {
+  retryLater = undefined;
   statusController?.abort();
   const controller = new AbortController();
   const job = { chat, message, controller, steps: [] };
@@ -1060,12 +1062,22 @@ async function generate(chat, message) {
       message.status = 'stopped';
       message.text = message.text.trim();
       $('announcer').textContent = 'Reply stopped.';
+    } else if (message.text.trim()) {
+      // Words already on the page are not thrown away because the stream ended.
+      message.status = 'complete';
+      const reason = error instanceof Error ? error.message : '';
+      message.warning = ['The reply stopped early; the text above is what arrived.', reason].join(' ').trim().slice(0, 600);
+      $('announcer').textContent = 'The reply ended early.';
     } else {
-      // Provider stream errors can invalidate a partly delivered answer.
+      const reason = (error instanceof Error && error.message) || 'The reply could not be completed.';
       message.status = 'error';
-      message.text = '';
-      message.warning = (error instanceof Error ? error.message : 'Could not complete the reply. Try again.').slice(0, 600);
-      $('announcer').textContent = 'Could not complete the reply.';
+      message.warning = reason.slice(0, 600);
+      // Nothing arrived: one automatic second try beats handing back an error.
+      if (!message.retried) {
+        message.retried = true;
+        retryLater = { chat, message };
+      }
+      $('announcer').textContent = message.retried ? 'The reply failed; trying once more.' : 'Could not complete the reply.';
     }
   } finally {
     runtime.dispose?.();
@@ -1078,6 +1090,14 @@ async function generate(chat, message) {
     paintHistory();
     paintSettings();
     if (hadFocus) prompt.focus({ preventScroll: true });
+    if (retryLater?.message === message && current === chat) {
+      const pending = retryLater;
+      retryLater = undefined;
+      setTimeout(() => {
+        if (active || !chats.includes(pending.chat) || pending.message.status !== 'error') return;
+        generate(pending.chat, pending.message);
+      }, 900);
+    }
   }
 }
 

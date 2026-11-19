@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, isCodeRequest, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
+import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, isCodeRequest, isRefusal, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -163,6 +163,82 @@ test('a question that is not about code keeps the ordinary team instructions', a
   });
   assert.equal(seen[0].code, false);
   assert.doesNotMatch(seen[1].messages[0].content, /fail to compile/);
+});
+
+test('a refusal is recognised, an answer that merely apologises is not', () => {
+  for (const text of [
+    'I cannot help with that.',
+    "I'm sorry, but I can't do that.",
+    'As an AI language model, I cannot write that.',
+    'I am unable to provide this.',
+    '',
+  ]) assert.equal(isRefusal(text), true, text);
+  for (const text of [
+    'Rainbows form when light bends in raindrops.',
+    'I can\'t run this here, but here it is:\n```js\nconst a = 1;\n```',
+    'Sure — here is the function you asked for, with the imports it needs.',
+  ]) assert.equal(isRefusal(text), false, text);
+});
+
+test('a model that declines is asked again, by another model and more plainly', async () => {
+  const seen = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a Python web scraper.' }],
+    signal: signal(), mode: 'solo',
+    generate: async (request) => {
+      seen.push(request);
+      if (seen.length === 1) return { text: 'I cannot help with that.', model: 'model-a', limited: false };
+      return { text: 'Here it is:\n```python\nimport requests\nhtml = requests.get(url).text\n```', model: 'model-b' };
+    },
+  });
+  assert.equal(seen.length, 2);
+  assert.match(result.text, /import requests/);
+  assert.equal(result.model, 'model-b');
+  // The retry says what is wanted and avoids the model that declined.
+  assert.ok(seen[1].messages.some((m) => m.role === 'system' && /not a refusal/.test(m.content)));
+  assert.deepEqual(seen[1].preferOtherThan, ['model-a']);
+});
+
+test('a coding request answered in prose is asked again for the code itself', async () => {
+  const seen = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a function that reverses a string in Python.' }],
+    signal: signal(), mode: 'solo',
+    generate: async (request) => {
+      seen.push(request);
+      return seen.length === 1
+        ? { text: 'You can reverse a string with slicing.', model: 'model-a' }
+        : { text: '```python\ndef reverse(text):\n    return text[::-1]\n```', model: 'model-b' };
+    },
+  });
+  assert.equal(seen.length, 2);
+  assert.match(result.text, /text\[::-1\]/);
+  assert.ok(seen[1].messages.some((m) => m.role === 'system' && /fenced block containing the complete/.test(m.content)));
+});
+
+test('when every model declines the reader is told what to do, not left with a refusal', async () => {
+  let calls = 0;
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a Python web scraper.' }],
+    signal: signal(), mode: 'solo',
+    generate: async () => { calls++; return { text: "I'm sorry, but I can't do that.", model: `model-${calls}` }; },
+  });
+  assert.equal(calls, 3);
+  assert.doesNotMatch(result.text, /I cannot|can't do that/i);
+  assert.match(result.text, /rephrasing usually gets through/);
+});
+
+test('a final pass that declines does not replace a draft that answered', async () => {
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Why is the sky blue?' }],
+    signal: signal(), mode: 'pair',
+    generate: async (request) => {
+      if (request.purpose === 'draft') return { text: 'Sunlight scatters off air molecules.', model: 'model-a' };
+      return { text: 'I cannot help with that.', model: 'model-b' };
+    },
+  });
+  assert.equal(result.text, 'Sunlight scatters off air molecules.');
+  assert.match(result.warning ?? '', /rephrasing usually gets through/);
 });
 
 test('normal chat asks a single model and passes live output through', async () => {
