@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CONNECTOR_KEY, SERVICES, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors,
+  CONNECTOR_KEY, SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors,
 } from '../web/connectors.mjs';
 
 const fakeStorage = () => {
@@ -145,4 +145,28 @@ test('summarises a result for the model, and nothing when it failed', () => {
   assert.equal(text, 'Your repositories:\n- a/b (JavaScript)');
   assert.equal(summarise({ error: 'nope' }), '');
   assert.equal(summarise({ title: 'x', items: [] }), '');
+});
+
+test('checks which account a GitHub token belongs to', async () => {
+  const seen = [];
+  const who = await githubIdentity(' ghp_test ', { fetchImpl: async (url, options) => {
+    seen.push({ url, auth: options.headers.Authorization });
+    return Response.json({ login: 'socks275' });
+  } });
+  assert.deepEqual(who, { login: 'socks275' });
+  assert.equal(seen[0].url, 'https://api.github.com/user');
+  assert.equal(seen[0].auth, 'Bearer ghp_test');
+  assert.equal(await githubIdentity('bad', { fetchImpl: async () => new Response('{}', { status: 401 }) }), undefined);
+  assert.equal(await githubIdentity('', {}), undefined);
+});
+
+test('keeps the OAuth settings next to the token', () => {
+  const storage = fakeStorage();
+  writeConnectors(storage, {
+    github: { clientId: 'Iv1.abc', relay: 'https://relay.test', login: 'socks275' },
+    supabase: {}, cloudflare: {}, reddit: {},
+  });
+  assert.deepEqual(readConnectors(storage).github, {
+    clientId: 'Iv1.abc', relay: 'https://relay.test', login: 'socks275',
+  });
 });

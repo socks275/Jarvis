@@ -31,12 +31,49 @@ Settings → **Connectors** links a chat to the services you already use:
 
 | Connector | What you add | What you can ask |
 | --- | --- | --- |
-| GitHub | a personal access token | “list my GitHub repos”, “GitHub commits in owner/repo”, “my github notifications” |
+| GitHub | a personal access token, or OAuth through your own relay | “list my GitHub repos”, “GitHub commits in owner/repo”, “my github notifications” |
 | Supabase | project URL and anon key | “Supabase rows from profiles” |
 | Cloudflare | an API token with Zone:Read | “my Cloudflare zones”, “Cloudflare DNS for example.com” |
 | Reddit | nothing | “hot in r/webdev”, “search Reddit for mechanical keyboards” |
 
 A connector only answers when the service is named in the message, so an ordinary question about GitHub still goes to the models. Chorus fetches the data itself, shows it in a card with links, and hands the same rows to the models as context so the reply can talk about them. Keys live in this browser's storage, are sent only to the service they belong to, and are never put in a chat message or sent to a model. Nothing is proxied through a server — each request goes straight from your browser, so a service that blocks cross-origin requests will report an error in the card instead of silently failing.
+
+### Signing in with OAuth
+
+A pasted token is the quick path, and **Sign in with GitHub** is the real OAuth one. There is one thing that cannot be designed away: GitHub's sign-in endpoints send no CORS headers ([github/isaacs#330](https://github.com/isaacs/github/issues/330)), so a browser is not allowed to swap an OAuth code for a token. The exchange has to happen somewhere that can hold the client secret. That is the relay — deploy it once, and Chorus never sees the secret.
+
+A Cloudflare Worker is enough (free tier):
+
+```js
+export default {
+  async fetch(request, env) {
+    const cors = {
+      'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'content-type',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'POST') return new Response('POST only', { status: 405, headers: cors });
+    const { code } = await request.json();
+    const response = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      body: new URLSearchParams({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
+    });
+    const data = await response.json();
+    if (!data.access_token) return Response.json({ error: data.error, error_description: data.error_description }, { status: 400, headers: cors });
+    return Response.json({ access_token: data.access_token }, { headers: cors });
+  },
+};
+```
+
+1. Create an OAuth App at [github.com/settings/developers](https://github.com/settings/developers) and set its callback to the URL you open Chorus at.
+2. Deploy the worker with `ALLOWED_ORIGIN`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` set as secrets.
+3. In Settings → Connectors → GitHub, paste the client ID and the worker URL, then press **Sign in with GitHub**.
+
+Chorus checks the account afterwards and shows “Connected as @you”. The relay is optional: the token field keeps working on its own. `*.workers.dev`, `*.pages.dev`, `*.deno.dev`, `*.vercel.app` and `*.netlify.app` are already allowed in the page's `connect-src`; a relay on another host needs that host added there.
+
+Reddit, Cloudflare and Supabase have no browser-safe OAuth: Reddit's token endpoint refuses cross-origin calls, Cloudflare's OAuth needs a client secret and is not offered for public clients, and a Supabase project is authenticated by its URL and key rather than by signing in.
 
 ## Privacy and history
 

@@ -10,6 +10,19 @@ export const SERVICES = [
     label: 'GitHub',
     blurb: 'Read your repositories, notifications, issues and commits.',
     fields: [{ key: 'token', label: 'Personal access token', hint: 'a token with repo and read:user' }],
+    // Sign-in state that is not a secret: the OAuth client id, the relay that
+    // swaps the code for a token, and the account name we checked.
+    oauth: {
+      provider: 'github',
+      fields: [
+        { key: 'clientId', label: 'OAuth client ID' },
+        { key: 'relay', label: 'OAuth relay URL', placeholder: 'https://chorus-oauth.your-name.workers.dev' },
+      ],
+      connect: 'Sign in with GitHub',
+      // Remembered for display only: the account the token belongs to.
+      keep: [{ key: 'login' }],
+      tokenPage: 'https://github.com/settings/tokens/new?scopes=repo,read:user&description=Chorus',
+    },
     examples: ['list my GitHub repos', 'GitHub commits in owner/repo'],
   },
   {
@@ -52,7 +65,7 @@ export function readConnectors(storage) {
     const entry = raw[service.id];
     if (!entry || typeof entry !== 'object') continue;
     const values = {};
-    for (const { key } of service.fields) {
+    for (const { key } of [...service.fields, ...(service.oauth?.fields ?? []), ...(service.oauth?.keep ?? [])]) {
       const text = typeof entry[key] === 'string' ? entry[key].trim().slice(0, FIELD_LIMIT) : '';
       if (text) values[key] = text;
     }
@@ -300,6 +313,28 @@ async function reddit(request, _connectors, { fetchImpl, signal }) {
     })),
     note: posts.length ? undefined : 'That subreddit is empty or private.',
   };
+}
+
+/**
+ * Reads the account a token belongs to, so "Connected as …" is a fact rather
+ * than a guess, and a bad token is caught straight away.
+ */
+export async function githubIdentity(token, { fetchImpl = globalThis.fetch, signal } = {}) {
+  const trimmed = String(token ?? '').trim();
+  if (!trimmed) return undefined;
+  let response;
+  try {
+    response = await fetchImpl('https://api.github.com/user', {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${trimmed}`, 'X-GitHub-Api-Version': '2022-11-28' },
+      credentials: 'omit', signal,
+    });
+  } catch {
+    return undefined;
+  }
+  if (!response.ok) return undefined;
+  const data = await response.json().catch(() => ({}));
+  const login = typeof data?.login === 'string' ? data.login : undefined;
+  return login ? { login } : undefined;
 }
 
 /** Runs one parsed request and returns what the chat card should show. */

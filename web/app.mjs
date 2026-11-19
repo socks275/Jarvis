@@ -4,7 +4,8 @@ import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orde
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
-import { SERVICES, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors } from './connectors.mjs';
+import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, writeConnectors } from './connectors.mjs';
+import { OAUTH_STATE_KEY, authorizeUrl, cleanUrl, readCallback, redeemCode } from './oauth.mjs';
 
 const $ = (id) => document.getElementById(id);
 const prompt = $('prompt');
@@ -229,6 +230,39 @@ function paintSettings() {
   $('clear-chats').disabled = Boolean(active || !chats.length);
 }
 
+// GitHub sends the browser back here with ?code; the relay turns it into a token.
+async function finishGithubSignIn() {
+  const callback = readCallback(location.href);
+  if (!callback) return;
+  try { window.history.replaceState(null, '', cleanUrl(location.href)); } catch { /* embedded history can be restricted */ }
+  const saved = connectors.github ?? {};
+  const expected = (() => { try { return sessionStorage.getItem(OAUTH_STATE_KEY); } catch { return undefined; } })();
+  if (callback.error) {
+    toast(`GitHub sign-in was cancelled (${callback.error}).`);
+    return;
+  }
+  if (!saved.relay) {
+    toast('Add the OAuth relay URL in Settings, then sign in again.');
+    return;
+  }
+  if (expected && callback.state !== expected) {
+    toast('That sign-in link was not started in this browser. Try again.');
+    return;
+  }
+  try {
+    const token = await redeemCode({ relay: saved.relay, code: callback.code });
+    connectors = { ...connectors, github: { ...saved, token } };
+    writeConnectors(storage, connectors);
+    paintConnectors();
+    toast('Signed in to GitHub.');
+    await verifyGithub();
+  } catch (error) {
+    toast(String(error?.message ?? error).slice(0, 170));
+  } finally {
+    try { sessionStorage.removeItem(OAUTH_STATE_KEY); } catch { /* storage can be denied */ }
+  }
+}
+
 function paintConnectors() {
   const list = $('connector-list');
   if (!list) return;
@@ -244,10 +278,14 @@ function paintConnectors() {
     head.append(state, el('strong', 'connector-name', service.label));
     head.append(el('small', 'connector-status', service.fields.length ? (on ? 'Connected' : 'Not connected') : 'Public · no key needed'));
     box.append(head, el('p', 'fine-print', service.blurb));
-    for (const field of service.fields) {
+    if (service.id === 'github' && saved.login) {
+      box.append(el('p', 'connector-account', `Connected as @${saved.login}`));
+    }
+    for (const field of [...service.fields, ...(service.oauth?.fields ?? [])]) {
+      const secret = field.key === 'token' || field.key === 'key';
       const input = el('input', 'text-field connector-input');
       input.id = `connector-${service.id}-${field.key}`;
-      input.type = field.key === 'url' ? 'url' : 'password';
+      input.type = secret ? 'password' : field.key === 'url' ? 'url' : 'text';
       input.autocomplete = 'off';
       input.spellcheck = false;
       input.placeholder = field.placeholder ?? field.hint ?? '';
@@ -255,6 +293,19 @@ function paintConnectors() {
       const label = el('label', 'text-label', field.label);
       label.htmlFor = input.id;
       box.append(label, input);
+    }
+    if (service.oauth) {
+      const oauthActions = el('div', 'settings-buttons');
+      const start = el('button', 'button border-button', service.oauth.connect);
+      start.type = 'button';
+      start.dataset.oauthStart = service.oauth.provider;
+      const instead = el('a', 'text-action', 'Get a token instead');
+      instead.href = service.oauth.tokenPage;
+      instead.target = '_blank';
+      instead.rel = 'noopener noreferrer';
+      oauthActions.append(start, instead);
+      box.append(oauthActions);
+      box.append(el('p', 'fine-print', 'Sign-in runs through a relay you deploy once, because GitHub will not swap a code for a token inside a browser. The README has the whole function.'));
     }
     if (service.fields.length) {
       const actions = el('div', 'settings-buttons');
@@ -1023,7 +1074,47 @@ $('reset-permission').addEventListener('click', () => {
   $('check-network').focus();
   toast('Chorus will ask next time you send a community message.');
 });
+function connectorValues(service) {
+  const values = { ...(connectors[service.id] ?? {}) };
+  for (const field of [...service.fields, ...(service.oauth?.fields ?? [])]) {
+    const value = document.getElementById(`connector-${service.id}-${field.key}`)?.value.trim().slice(0, 400) ?? '';
+    if (value) values[field.key] = value;
+    else delete values[field.key];
+  }
+  return values;
+}
+
+async function verifyGithub() {
+  const token = connectors.github?.token;
+  if (!token) return;
+  const who = await githubIdentity(token).catch(() => undefined);
+  if (!who) {
+    toast('GitHub did not accept that token.');
+    return;
+  }
+  if (connectors.github.login === who.login) return;
+  connectors = { ...connectors, github: { ...connectors.github, login: who.login } };
+  writeConnectors(storage, connectors);
+  paintConnectors();
+}
+
 $('connector-list').addEventListener('click', (event) => {
+  const start = event.target.closest('[data-oauth-start]');
+  if (start) {
+    const service = SERVICES.find(({ id }) => id === start.dataset.oauthStart);
+    const saved = connectorValues(service);
+    connectors = { ...connectors, [service.id]: saved };
+    writeConnectors(storage, connectors);
+    paintConnectors();
+    if (!saved.clientId || !saved.relay) {
+      toast('Add the OAuth client ID and relay URL first.');
+      return;
+    }
+    const state = globalThis.crypto?.randomUUID?.() ?? String(Date.now());
+    try { sessionStorage.setItem(OAUTH_STATE_KEY, state); } catch { /* storage can be denied */ }
+    location.assign(authorizeUrl({ clientId: saved.clientId, redirectUri: `${location.origin}${location.pathname}`, state }));
+    return;
+  }
   const save = event.target.closest('[data-connector-save]');
   const clear = event.target.closest('[data-connector-clear]');
   if (!save && !clear) return;
@@ -1037,16 +1128,12 @@ $('connector-list').addEventListener('click', (event) => {
     toast(`${service.label} disconnected`);
     return;
   }
-  const values = {};
-  for (const field of service.fields) {
-    const value = document.getElementById(`connector-${service.id}-${field.key}`)?.value.trim().slice(0, 400) ?? '';
-    if (value) values[field.key] = value;
-  }
-  connectors = { ...connectors, [service.id]: values };
+  connectors = { ...connectors, [service.id]: connectorValues(service) };
   toast(writeConnectors(storage, connectors)
-    ? `${service.label} connected in this browser`
+    ? `${service.label} saved in this browser`
     : 'This browser would not let Chorus save the key.');
   paintConnectors();
+  if (service.id === 'github') void verifyGithub();
 });
 
 $('scroll-latest').addEventListener('click', () => { scrollToEnd(); prompt.focus({ preventScroll: true }); });
@@ -1146,3 +1233,4 @@ paintSidebar();
 openChat(chatFromUrl(), { fromUrl: true, focus: false });
 paintConnection();
 paintConnectors();
+void finishGithubSignIn();
