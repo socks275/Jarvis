@@ -1,5 +1,5 @@
 export const PROMPT_LIMIT = 4000;
-export const OUTPUT_LIMIT = 12000;
+export const OUTPUT_LIMIT = 32000;
 // Storage keys keep their original prefix so saved chats survive the rename.
 export const HISTORY_KEY = 'frenemy-web:chats:v1';
 const LEGACY_KEY = 'frenemy-web:runs:v1';
@@ -122,22 +122,26 @@ async function answerFully({ generate, request, signal, onText = () => {}, round
   let model = first.model;
   for (let round = 0; round < rounds && limited && text.length < OUTPUT_LIMIT; round++) {
     signal.throwIfAborted();
+    const soFar = text;
     let next;
     try {
       // No preferOtherThan here: the same model continuing its own work reads best.
       next = await generate({
-        messages: [...request.messages, { role: 'assistant', content: text }, { role: 'user', content: CONTINUE_NOTE }],
+        messages: [...request.messages, { role: 'assistant', content: endOf(soFar) }, { role: 'user', content: CONTINUE_NOTE }],
         signal, purpose: 'continue',
-        onText: (part) => onText(joinContinuation(text, part)),
+        onText: (part) => onText(joinContinuation(soFar, part)),
       });
     } catch (error) {
       if (signal.aborted) throw error;
       // Keep what the reader already has rather than losing the whole answer.
       break;
     }
-    text = joinContinuation(text, next.text ?? '');
+    text = joinContinuation(soFar, next.text ?? '');
     limited = next.limited === true;
     model = next.model ?? model;
+    // Nothing new arrived, so the model has said all it is going to: asking
+    // again would only put another request in the queue.
+    if (text.length <= soFar.length) break;
   }
   const answer = { ...first, text: text.slice(0, OUTPUT_LIMIT) };
   if (limited) answer.limited = true;
@@ -152,7 +156,13 @@ function teamStep(role, model) {
 }
 
 const CONTINUE_NOTE = 'Continue exactly where the previous answer stopped. Do not repeat anything, do not apologise, and do not start over.';
-const CONTINUE_ROUNDS = 2;
+// A long answer is finished in as many passes as it takes; the reader should
+// never have to ask. Eight passes is the ceiling before the reply is simply long.
+const CONTINUE_ROUNDS = 8;
+// A pass only needs the end of the answer so far: the whole answer can be far
+// larger than the model's context, and the rest is already on the page.
+const CONTINUE_TAIL = 4000;
+const endOf = (text) => (text.length > CONTINUE_TAIL ? text.slice(-CONTINUE_TAIL) : text);
 
 /** Joins a continuation onto the text it continues, without repeating a restarted answer. */
 export function joinContinuation(head, tail) {

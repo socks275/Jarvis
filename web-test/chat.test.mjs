@@ -259,15 +259,64 @@ test('a failed continuation keeps the part that already streamed', async () => {
   assert.equal(result.limited, true);
 });
 
-test('a reply that is still cut off after the extra rounds keeps the limit note', async () => {
+test('a reply is continued as many times as the model still has something to add', async () => {
+  let calls = 0;
+  const parts = [];
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async (request) => {
+      calls++;
+      request.onText?.(`part ${calls} `);
+      if (request.purpose === 'continue') parts.push(request.messages.at(-2).content);
+      return { text: `part ${calls} `, model: 'model-a', limited: calls < 4 };
+    },
+  });
+  assert.equal(calls, 4);
+  assert.equal(result.limited, undefined);
+  assert.equal(result.text, 'part 1 part 2 part 3 part 4 ');
+  // Each pass is handed the answer so far.
+  assert.deepEqual(parts, ['part 1 ', 'part 1 part 2 ', 'part 1 part 2 part 3 ']);
+});
+
+test('a model that keeps asking for more room cannot loop forever', async () => {
   let calls = 0;
   const result = await answerChat({
     messages: [{ role: 'user', content: 'hi' }], signal: signal(),
     generate: async () => { calls++; return { text: `part ${calls} `, model: 'model-a', limited: true }; },
   });
-  assert.equal(calls, 3);
+  assert.equal(calls, 9);
   assert.equal(result.limited, true);
-  assert.equal(result.text, 'part 1 part 2 part 3 ');
+  assert.equal(result.text, 'part 1 part 2 part 3 part 4 part 5 part 6 part 7 part 8 part 9 ');
+});
+
+test('a model that adds nothing ends the passes instead of queueing more', async () => {
+  let calls = 0;
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async () => { calls++; return { text: calls === 1 ? 'Half' : '   ', model: 'model-a', limited: true }; },
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.text, 'Half');
+  assert.equal(result.limited, true);
+});
+
+test('a long answer hands the next pass only its end, not the whole of it', async () => {
+  const long = 'x'.repeat(9000);
+  let handed = '';
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async (request) => {
+      if (request.purpose === 'continue') {
+        handed = request.messages.at(-2).content;
+        return { text: 'y', model: 'model-a' };
+      }
+      return { text: long, model: 'model-a', limited: true };
+    },
+  });
+  assert.equal(handed.length, 4000);
+  assert.equal(handed, long.slice(-4000));
+  assert.equal(result.text, `${long}y`);
+  assert.equal(result.limited, undefined);
 });
 
 test('a normal question has one model draft and a second model finish it', async () => {
