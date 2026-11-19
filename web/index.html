@@ -113,6 +113,7 @@
                 <label for="prompt" class="sr-only">Message Chorus</label>
                 <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
                 <div class="composer-controls">
+                  <button type="button" class="deep-button direct-chip" id="direct-chip" hidden aria-pressed="false" title="Uncensored mode is on: replies are asked to answer without hedging. Click to open Settings."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Uncensored</button>
                   <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
                   <span class="composer-spacer"></span>
                   <span class="key-hint" aria-hidden="true"><kbd>↵</kbd> Enter to send</span>
@@ -179,7 +180,14 @@
       <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
       <label class="engine-option"><input type="radio" name="engine" value="local" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>On-device</strong><small>Use a GGUF model file</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
     </fieldset>
-    <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
+    <div class="settings-box" id="answering-settings">
+      <div class="settings-switch">
+        <div><strong id="direct-label">Uncensored mode</strong><p>Ask the models to answer what you asked, without hedging: no lectures, no disclaimers, no moral verdict, and fiction answered as fiction.</p></div>
+        <button type="button" class="switch" id="direct-toggle" role="switch" aria-checked="false" aria-labelledby="direct-label" title="Turn uncensored mode on"><span aria-hidden="true"></span></button>
+      </div>
+      <p class="fine-print">This changes the instructions Chorus sends, nothing else: your messages still go to the same models, and a model’s own training still has the last word. When every model declines, the reply tells you so plainly instead of inventing an answer — switching the mode off will not make a model take it on. It applies to replies you start from now on.</p>
+    </div>
+<p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
       <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
       <p>One model reads each message first and decides how many models should answer: one for small talk, two for a question, three for code or tricky work. The reply names the model that decided and the models that answered.</p>

@@ -112,6 +112,20 @@ test('the engine sends the code flag through to the request it builds', async ()
   assert.equal(sent.temperature, 0.2);
 });
 
+test('the pass that finishes a reply prefers a stronger model that is in reach', () => {
+  const models = [
+    { id: 'small/Model-7B', count: 6, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'Llama-3.1-70B-Instruct', count: 2, context: 8192, tokens: 1024, queue: 4 },
+    { id: 'huge/Model-405B', count: 1, context: 8192, tokens: 1024, queue: 300 },
+  ];
+  const finished = planCommunityRequest(models, { messages, purpose: 'final' });
+  assert.equal(finished.models[0], 'Llama-3.1-70B-Instruct');
+  // A model buried in a queue of 300 jobs is not in reach, so it goes last.
+  assert.equal(finished.models.at(-1), 'huge/Model-405B');
+  // Ordinary passes still go by capacity.
+  assert.equal(planCommunityRequest(models, { messages, purpose: 'answer' }).models[0], 'small/Model-7B');
+});
+
 test('sends chat roles anonymously, reports queue hints, decodes actual deltas and records the final model', async () => {
   const phases = [], updates = [];
   let posts = 0;
@@ -185,6 +199,16 @@ test('honors Retry-After without retrying a failed generation', async () => {
   await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /after the cooldown/);
   assert.equal(requests, 1);
   assert.deepEqual(pauses, [12]);
+});
+
+test('one reply asks for the roster once, not once per pass', async () => {
+  let lookups = 0;
+  const { generate } = communityEngine({ fetchImpl: async (url) => {
+    if (url.endsWith('/models')) { lookups++; return list(card('worker/A'), card('worker/B')); }
+    return stream([event({ choices: [{ delta: { content: 'ok' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+  } });
+  for (const purpose of ['draft', 'review', 'final']) await generate({ messages, signal: signal(), purpose });
+  assert.equal(lookups, 1);
 });
 
 test('reroutes a stale unqueued model once when the roster changed', async () => {

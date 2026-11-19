@@ -25,6 +25,17 @@ const templates = {
 
 let storage;
 try { storage = window.localStorage; } catch { /* some embedded contexts deny storage */ }
+// Preferences are per browser, like the connectors: no account, no sync.
+const PREFS_KEY = 'chorus-web:prefs:v1';
+function readPrefs() {
+  try {
+    const saved = JSON.parse(storage?.getItem(PREFS_KEY) ?? '{}');
+    return { direct: saved?.direct === true };
+  } catch { return { direct: false }; }
+}
+function writePrefs() {
+  try { storage?.setItem(PREFS_KEY, JSON.stringify({ direct })); } catch { /* storage disabled */ }
+}
 let connectors = readConnectors(storage);
 let connectorRun = false;
 let chats = readChats(storage);
@@ -38,6 +49,8 @@ let engine = 'community';
 let localFile;
 let validatingFile = false;
 let deeper = false;
+// Uncensored mode: off unless it was switched on in this browser.
+let direct = readPrefs().direct;
 let communityAllowed = false;
 let consentAction;
 let statusController;
@@ -190,6 +203,8 @@ function paintComposer() {
   $('deep-button').hidden = engine === 'local';
   $('deep-button').disabled = Boolean(active);
   $('deep-button').setAttribute('aria-pressed', String(deeper));
+  $('direct-chip').hidden = !direct;
+  $('direct-chip').setAttribute('aria-pressed', String(direct));
   $('composer-status').hidden = !(busyElsewhere || cooldown || needsFile);
   $('composer-note').textContent = busyElsewhere ? 'Chorus is replying in another chat.'
     : cooldown ? 'The community network asked us to wait. You can send again when the cooldown ends.'
@@ -214,6 +229,9 @@ function paintSettings() {
     option.disabled = locked;
   }
   $('settings-busy').hidden = !active;
+  $('direct-toggle').setAttribute('aria-checked', String(direct));
+  $('direct-toggle').disabled = locked;
+  $('direct-toggle').title = direct ? 'Turn uncensored mode off' : 'Turn uncensored mode on';
   $('community-settings').hidden = engine !== 'community';
   $('local-settings').hidden = engine !== 'local';
   $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
@@ -743,6 +761,12 @@ function messageNode(message, last) {
     retry.disabled = blocked();
     actions.append(retry);
   }
+  if (message.raw) {
+    const mode = el('span', 'message-meta', 'Uncensored');
+    mode.title = 'This reply was written with uncensored mode on.';
+    mode.dataset.mode = 'direct';
+    actions.append(mode);
+  }
   if (message.model) {
     const source = el('span', 'message-meta', message.model);
     source.title = `${message.engine === 'community' ? 'Community model' : 'Local model'}: ${message.model}`;
@@ -876,7 +900,12 @@ function tryReply(action) {
   const deep = engine === 'community' && deeper;
   if (retry) {
     reply = current.messages.at(-1);
-    Object.assign(reply, { deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined, team: undefined });
+    // Asking again honours the mode as it is set now: turning uncensored on and
+    // pressing Try again is how a refused answer gets another chance.
+    Object.assign(reply, {
+      deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined, team: undefined,
+      raw: direct || undefined,
+    });
   } else {
     drafts.delete(current?.id ?? '');
     if (!current) {
@@ -885,7 +914,7 @@ function tryReply(action) {
       chats = [current, ...orderedChats(chats).slice(0, 31)];
       urlForChat(current);
     }
-    reply = newTurn(current, text, engine, deep);
+    reply = newTurn(current, text, engine, deep, direct);
     prompt.value = '';
   }
   generate(current, reply);
@@ -908,7 +937,7 @@ async function runConnectorTurn(text, request) {
     chats = [current, ...orderedChats(chats).slice(0, 31)];
     urlForChat(current);
   }
-  const reply = newTurn(current, text, engine, engine === 'community' && deeper);
+  const reply = newTurn(current, text, engine, engine === 'community' && deeper, direct);
   const question = current.messages.at(-2);
   prompt.value = '';
   sizePrompt();
@@ -1043,7 +1072,7 @@ async function generate(chat, message) {
   try {
     // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
-      signal: controller.signal, deep: message.deep, mode: message.engine === 'local' ? 'solo' : undefined,
+      signal: controller.signal, deep: message.deep, direct: message.raw === true, mode: message.engine === 'local' ? 'solo' : undefined,
       decide: message.engine === 'community',
       onText(text) { message.text = text; refreshStream(job); },
       onStep(step) {
@@ -1157,6 +1186,20 @@ for (const control of document.querySelectorAll('[data-prompt]')) control.addEve
   prompt.focus();
 });
 $('deep-button').addEventListener('click', () => { deeper = !deeper; paintComposer(); });
+function setDirect(next) {
+  if (active || validatingFile) return;
+  direct = next;
+  writePrefs();
+  paintSettings();
+  paintComposer();
+  toast(direct ? 'Uncensored mode on for your next replies' : 'Uncensored mode off');
+}
+$('direct-toggle').addEventListener('click', () => {
+  if (active || validatingFile) return;
+  setDirect(!direct);
+});
+// The chip is a reminder that the mode is on; the switch itself lives in Settings.
+$('direct-chip').addEventListener('click', () => { paintSettings(); $('settings-dialog').showModal(); });
 $('canvas-close').addEventListener('click', closeCanvas);
 $('canvas-open').addEventListener('click', () => {
   if (!$('canvas').hidden) { closeCanvas(); return; }

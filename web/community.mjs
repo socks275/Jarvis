@@ -210,6 +210,37 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
 const CODE_MODEL = /(?:coder|codestral|codeqwen|starcoder|codegen|devstral|deepseek|qwen|code-?llama|gemma-?code)/i;
 const codeFit = (model) => (CODE_MODEL.test(model.id) ? 1 : 0);
 
+// The size in the name is the only quality signal the roster gives us: an idle
+// 7B model is not the model to finish a hard answer with if a 70B is reachable.
+const MODEL_SIZE = /(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])/;
+const sizeOf = (id) => {
+  const match = MODEL_SIZE.exec(String(id ?? ''));
+  return match ? Number(match[1]) : 0;
+};
+const STRONG_SIZE = 30;
+const QUEUE_SLACK = 8;
+
+/**
+ * Prefers a strong model for the pass that matters, as long as its queue is in
+ * the same league as the best one on offer. Capacity still decides the rest.
+ */
+function orderForQuality(pool) {
+  const waits = pool.map((model) => model.queue / model.count).filter((wait) => Number.isFinite(wait));
+  const best = waits.length ? Math.min(...waits) : 0;
+  const reachable = (model) => {
+    const wait = model.queue / model.count;
+    return !Number.isFinite(wait) || wait <= best + QUEUE_SLACK;
+  };
+  const strength = (model) => (sizeOf(model.id) >= STRONG_SIZE && reachable(model) ? 1 : 0);
+  const wait = (model) => model.queue / model.count;
+  return pool.slice().sort((a, b) => {
+    const strong = strength(b) - strength(a);
+    if (strong) return strong;
+    if (strength(a) && strength(b)) return sizeOf(b.id) - sizeOf(a.id) || wait(a) - wait(b) || a.id.localeCompare(b.id);
+    return wait(a) - wait(b) || b.count - a.count || a.id.localeCompare(b.id);
+  });
+}
+
 export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false }) {
   if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
   const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
@@ -233,10 +264,12 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     const others = avoid.length ? fitting.filter((m) => !avoid.includes(m.id)) : [];
     const pool = others.length ? others : fitting;
     // A coding task also wants the roomier models: a long answer is cut short
-    // by a small context just as surely as by a small token budget.
+    // by a small context just as surely as by a small token budget. The pass
+    // that finishes a reply prefers a bigger model when one is reachable.
+    const ranked = code || purpose === 'final' ? orderForQuality(pool) : pool;
     const ordered = code
-      ? [...pool].sort((a, b) => (codeFit(b) - codeFit(a)) || (b.room - a.room) || a.id.localeCompare(b.id))
-      : pool;
+      ? [...ranked].sort((a, b) => (codeFit(b) - codeFit(a)) || 0)
+      : ranked;
     const candidates = ordered.slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
@@ -248,14 +281,23 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
   }
 }
 
+// One reply makes several passes (draft, review, final); they can share a
+// roster instead of asking the network for the same list each time.
+const ROSTER_TTL = 45_000;
+
 export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLimit = () => {}, fetchImpl = globalThis.fetch } = {}) {
+  let roster;
+  let rosterAt = 0;
   return {
     async generate({ messages, signal, purpose, preferOtherThan, onText, code = false }) {
-      const plan = async () => {
-        onPhase('finding');
-        const models = await getOnlineModels({ signal, fetchImpl });
-        onModels(models);
-        return planCommunityRequest(models, { messages, purpose, preferOtherThan, code });
+      const plan = async ({ fresh = false } = {}) => {
+        if (fresh || !roster || Date.now() - rosterAt > ROSTER_TTL) {
+          onPhase('finding');
+          roster = await getOnlineModels({ signal, fetchImpl });
+          rosterAt = Date.now();
+        }
+        onModels(roster);
+        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code });
       };
       const complete = async (body) => {
         onPhase('waiting');
@@ -275,7 +317,8 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
         try { return await complete(first); }
         catch (error) {
           if (!error.refresh) throw error;
-          const next = await plan();
+          // The roster changed under us: look again rather than reusing it.
+          const next = await plan({ fresh: true });
           if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) throw error;
           return await complete(next);
         }
