@@ -49,6 +49,7 @@ Because the game is assembled here rather than sampled from a model, it is insta
 Free community models are not always cooperative. Two things keep a reply from ending in a dead end:
 
 - **A refusal is not an answer.** If a model replies *“I’m sorry, but I can’t do that”* — or any variant of declining, apologising as an AI, or citing a policy — Chorus asks again: a **different model**, with the request restated plainly, up to twice. Code in the reply counts as an answer, so “I can’t run this here, but here it is:” is never treated as a refusal. If every model declines, the last pass is dropped in favour of a draft that answered, and only if none of them did do you see a short note suggesting a rephrase or **Think deeper** — never a bare refusal.
+- **Coding requests get code, not prose.** If a message asks for code to be written and the reply arrives with no fenced block, Chorus asks again for the complete, runnable code — prose alone is not accepted as the answer to "write me a function".
 - **A connection that drops is not a lost answer.** If part of the reply already streamed, it stays on the page with a note that it ended early. If nothing arrived, Chorus retries the request once by itself before showing anything about a failure.
 
 ## Canvas and video

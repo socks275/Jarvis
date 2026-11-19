@@ -188,7 +188,7 @@ test('a model that declines is asked again, by another model and more plainly', 
     generate: async (request) => {
       seen.push(request);
       if (seen.length === 1) return { text: 'I cannot help with that.', model: 'model-a', limited: false };
-      return { text: 'import requests\n\nhtml = requests.get(url).text', model: 'model-b' };
+      return { text: 'Here it is:\n```python\nimport requests\nhtml = requests.get(url).text\n```', model: 'model-b' };
     },
   });
   assert.equal(seen.length, 2);
@@ -197,6 +197,23 @@ test('a model that declines is asked again, by another model and more plainly', 
   // The retry says what is wanted and avoids the model that declined.
   assert.ok(seen[1].messages.some((m) => m.role === 'system' && /not a refusal/.test(m.content)));
   assert.deepEqual(seen[1].preferOtherThan, ['model-a']);
+});
+
+test('a coding request answered in prose is asked again for the code itself', async () => {
+  const seen = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a function that reverses a string in Python.' }],
+    signal: signal(), mode: 'solo',
+    generate: async (request) => {
+      seen.push(request);
+      return seen.length === 1
+        ? { text: 'You can reverse a string with slicing.', model: 'model-a' }
+        : { text: '```python\ndef reverse(text):\n    return text[::-1]\n```', model: 'model-b' };
+    },
+  });
+  assert.equal(seen.length, 2);
+  assert.match(result.text, /text\[::-1\]/);
+  assert.ok(seen[1].messages.some((m) => m.role === 'system' && /fenced block containing the complete/.test(m.content)));
 });
 
 test('when every model declines the reader is told what to do, not left with a refusal', async () => {
