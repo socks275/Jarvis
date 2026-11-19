@@ -14,11 +14,31 @@ test('reads a video id from every common YouTube link', () => {
 test('only play requests are treated as play requests', () => {
   assert.deepEqual(playRequest('play https://youtu.be/dQw4w9WgXcQ'), { id: 'dQw4w9WgXcQ' });
   assert.deepEqual(playRequest('Play lofi hip hop'), { query: 'lofi hip hop' });
-  assert.deepEqual(playRequest('watch the video of a cat on YouTube'), { query: 'a cat' });
+  assert.deepEqual(playRequest('watch the video of a cat on YouTube'), { query: 'cat' });
+  assert.deepEqual(playRequest('play a jettism video'), { query: 'jettism' });
   assert.deepEqual(playRequest('play me some jazz'), { query: 'some jazz' });
   assert.equal(playRequest('what is YouTube'), undefined);
   assert.equal(playRequest('how do I play the piano'), undefined);
   assert.equal(playRequest('play'), undefined);
+});
+
+test('asks every instance at once and keeps the plain phrase when it can', async () => {
+  const seen = [];
+  const instances = [
+    { kind: 'invidious', url: 'https://slow.test/?q=' },
+    { kind: 'invidious', url: 'https://gone.test/?q=' },
+    { kind: 'piped', url: 'https://fast.test/?q=' },
+  ];
+  const found = await searchVideo('a jettism video', { instances, fetchImpl: async (url) => {
+    seen.push(url);
+    if (url.startsWith('https://gone.test')) throw new Error('offline');
+    if (url.startsWith('https://slow.test')) await new Promise((done) => setTimeout(done, 50));
+    return url.startsWith('https://slow.test')
+      ? Response.json([{ videoId: 'aaaaaaaaaaa', title: 'Slow' }])
+      : Response.json({ items: [{ url: '/watch?v=dQw4w9WgXcQ', title: 'Fast' }] });
+  } });
+  assert.deepEqual(found, { id: 'dQw4w9WgXcQ', title: 'Fast' });
+  assert.equal(seen.length, 3);
 });
 
 test('builds embed, thumbnail and search links', () => {

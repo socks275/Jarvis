@@ -572,6 +572,8 @@ body {
 .message-action:hover:not(:disabled) { border-color: #3a3052; color: var(--violet); background: #1c1729; }
 .video-frame { border-color: #2b2440; border-radius: 14px; box-shadow: 0 12px 30px #05030b73; }
 .video-link { color: #cbb0ff; }
+.video-retry { padding: 3px 11px; border: 1px solid #4a3a6b; border-radius: 99px; background: #1b1430; color: #dcc9ff; font-size: 11.5px; font-weight: 700; transition: border-color .16s ease, background .16s ease; }
+.video-retry:hover { border-color: #6d5596; background: #241c3b; }
 
 /* Canvas */
 .canvas { background: linear-gradient(180deg, #0d0b15, #09080f); border-left-color: #2b2440; box-shadow: -24px 0 60px #04030a9c; }

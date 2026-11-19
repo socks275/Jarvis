@@ -331,7 +331,7 @@ async function copy(text, control) {
   toast('Copied to clipboard');
 }
 
-function videoCard(video) {
+function videoCard(video, { pending = false, onRetry } = {}) {
   const card = el('div', 'video-card');
   if (video.id) {
     const frame = el('div', 'video-frame');
@@ -372,7 +372,17 @@ function videoCard(video) {
     link.href = searchUrl(video.query);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    meta.append(link, el('small', 'video-hint', 'The video search is unavailable right now, so this opens YouTube instead.'));
+    if (pending) {
+      meta.append(link, el('small', 'video-hint', 'Looking for the video…'));
+    } else {
+      meta.append(link, el('small', 'video-hint', 'The video search is unavailable right now, so this opens YouTube instead.'));
+      if (onRetry) {
+        const retry = el('button', 'video-retry', 'Try again');
+        retry.type = 'button';
+        retry.addEventListener('click', onRetry);
+        meta.append(retry);
+      }
+    }
   }
   card.append(meta);
   return card;
@@ -480,8 +490,13 @@ function messageNode(message, last) {
   content.append(el('p', 'assistant-name', 'Chorus'), body);
   body.hidden = !message.text;
   if (message.text) renderMarkdown(body, message.text, message.status !== 'pending');
-  if (message.video) content.append(videoCard(message.video));
-  else if (message.status === 'complete' && message.text) {
+  if (message.video) {
+    const mine = current?.messages.includes(message);
+    content.append(videoCard(message.video, {
+      pending: message.status === 'pending',
+      onRetry: mine && message.video.query ? () => findVideo(message) : undefined,
+    }));
+  } else if (message.status === 'complete' && message.text) {
     const linked = youtubeId(message.text);
     if (linked) content.append(videoCard({ id: linked }));
   }
@@ -668,21 +683,24 @@ async function startPlay(text, play) {
   save();
   paintView(true);
   paintHistory();
-  if (!play.id) {
-    // No key needed: public front-ends answer the search when they can.
-    reply.status = 'pending';
-    paintView(true);
-    const found = await searchVideo(play.query).catch(() => undefined);
-    if (found) {
-      reply.video = found;
-      delete reply.warning;
-    }
-    reply.status = 'complete';
-    save();
-    paintView(true);
-    paintHistory();
-  }
+  if (!play.id) await findVideo(reply);
   $('announcer').textContent = play.id ? 'Playing the video.' : 'Finding the video.';
+}
+
+// No key needed: public front-ends answer the search when they can, and the
+// card offers another attempt when none of them do.
+async function findVideo(reply) {
+  reply.status = 'pending';
+  paintView(true);
+  const found = await searchVideo(reply.video?.query).catch(() => undefined);
+  if (found) {
+    reply.video = found;
+    delete reply.warning;
+  }
+  reply.status = 'complete';
+  save();
+  paintView(true);
+  paintHistory();
 }
 
 async function generate(chat, message) {

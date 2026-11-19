@@ -21,7 +21,7 @@ Chorus answers with a small team of models, and one model decides the size of th
 
 Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.
 
-Type **play** followed by a YouTube link and the video starts in the chat without asking a model. Type a description instead and Chorus looks up the first match through public YouTube front-ends and plays it; no account, key or download is needed, and if none of those front-ends answer it offers a YouTube search link. The description goes to those front-ends, not to a model. YouTube links that appear in an answer get a click-to-play thumbnail.
+Type **play** followed by a YouTube link and the video starts in the chat without asking a model. Type a description instead and Chorus asks a set of public YouTube front-ends at the same time, takes the first answer and plays that match; no account, key or download is needed. Filler words are dropped first, so “play a jettism video” searches for “jettism”. If none of the front-ends answer, the card offers a YouTube search link and a **Try again** button. The description goes to those front-ends, not to a model. YouTube links that appear in an answer get a click-to-play thumbnail.
 
 If a model runs out of room part way through an answer, Chorus asks it to continue and joins the parts, so long code answers finish instead of stopping early. The output-limit note only appears if the reply is still truncated after those extra passes.
 
