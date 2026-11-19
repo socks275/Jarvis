@@ -44,6 +44,13 @@ Ask for a change and the same game is rebuilt with it: *“add a shotgun”* (a 
 
 Because the game is assembled here rather than sampled from a model, it is instant, needs no queue, and always runs. This is deliberately narrow: it builds a shooter arena. For anything else, ask normally and the models will write code you can open in the canvas.
 
+## When a model declines or drops
+
+Free community models are not always cooperative. Two things keep a reply from ending in a dead end:
+
+- **A refusal is not an answer.** If a model replies *“I’m sorry, but I can’t do that”* — or any variant of declining, apologising as an AI, or citing a policy — Chorus asks again: a **different model**, with the request restated plainly, up to twice. Code in the reply counts as an answer, so “I can’t run this here, but here it is:” is never treated as a refusal. If every model declines, the last pass is dropped in favour of a draft that answered, and only if none of them did do you see a short note suggesting a rephrase or **Think deeper** — never a bare refusal.
+- **A connection that drops is not a lost answer.** If part of the reply already streamed, it stays on the page with a note that it ended early. If nothing arrived, Chorus retries the request once by itself before showing anything about a failure.
+
 ## Canvas and video
 
 Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.
