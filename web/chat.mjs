@@ -1,5 +1,5 @@
 export const PROMPT_LIMIT = 4000;
-export const OUTPUT_LIMIT = 12000;
+export const OUTPUT_LIMIT = 32000;
 // Storage keys keep their original prefix so saved chats survive the rename.
 export const HISTORY_KEY = 'frenemy-web:chats:v1';
 const LEGACY_KEY = 'frenemy-web:runs:v1';
@@ -11,7 +11,7 @@ const textEncoder = new TextEncoder();
 const id = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${(++id.sequence)}`;
 id.sequence = 0;
 
-const INSTRUCTIONS = 'You are Chorus, a helpful AI assistant. Answer the user directly and use the recent conversation when relevant. Be accurate, practical, and clear. Use Markdown when it improves readability. If you are unsure, say so. Do not claim to have browsed the web or used tools.';
+const INSTRUCTIONS = 'You are Chorus, a helpful AI assistant. The earlier messages in this chat are the conversation so far: read them, keep the facts, names, numbers and decisions in them consistent, and resolve follow-ups such as "it" or "that" against them. Answer the latest user message directly. Be accurate, practical, and clear. Use Markdown when it improves readability. If you are unsure, say so. Do not claim to have browsed the web or used tools.';
 
 // Words that usually mean the answer needs real work rather than a sentence.
 const CODE_HINT = /\b(?:code|coding|function|functions|method|class|interface|refactor|debug|bug|stack trace|traceback|exception|regex|sql|database|schema|api|endpoint|typescript|javascript|python|rust|golang|php|kotlin|css|html|json|yaml|docker|kubernetes|git|bash|shell|npm|node|react|vue|svelte|compiler|deploy|migration|algorithm|unit test)\b/i;
@@ -68,9 +68,17 @@ export function conversationContext(chat, engine) {
   for (let i = 0; i < chat.messages.length - 2; i += 2) {
     const user = chat.messages[i];
     const assistant = chat.messages[i + 1];
-    // Never send turns made with a local model to the community provider.
-    if (assistant.status === 'complete' && assistant.engine === engine && assistant.text) {
+    // Never send turns made with a local model to the community provider. The
+    // other way round is safe: a model running in this browser may read turns
+    // the browser already holds, so switching engines does not lose the thread.
+    const readable = assistant?.engine === engine || (engine === 'local' && assistant?.engine === 'community');
+    if (user?.role !== 'user' || !readable) continue;
+    if (assistant.status === 'complete' && assistant.text) {
       pairs.push([{ role: 'user', content: user.text }, { role: 'assistant', content: assistant.text }]);
+    } else if (assistant.status === 'stopped' || assistant.status === 'error') {
+      // The answer never finished, but the question is still part of the chat:
+      // a follow-up like "which one did you pick?" makes no sense without it.
+      pairs.push([{ role: 'user', content: user.text }]);
     }
   }
   // A connector puts what it fetched here, so the models can talk about it.
@@ -93,8 +101,12 @@ export function shorterContext(messages) {
 }
 
 function followUp(messages, instruction, extra) {
+  // Keep the conversation rules and add the role: a team member is still
+  // answering in this chat, not seeing a draft out of nowhere.
+  const base = messages[0]?.role === 'system' ? messages[0].content : '';
   return [
-    { role: 'system', content: instruction }, ...messages.slice(1, -1),
+    { role: 'system', content: base ? `${base} ${instruction}` : instruction },
+    ...messages.slice(1, -1),
     { role: 'user', content: `Latest user message:\n${messages.at(-1).content}\n\n${extra}` },
   ];
 }
@@ -110,22 +122,26 @@ async function answerFully({ generate, request, signal, onText = () => {}, round
   let model = first.model;
   for (let round = 0; round < rounds && limited && text.length < OUTPUT_LIMIT; round++) {
     signal.throwIfAborted();
+    const soFar = text;
     let next;
     try {
       // No preferOtherThan here: the same model continuing its own work reads best.
       next = await generate({
-        messages: [...request.messages, { role: 'assistant', content: text }, { role: 'user', content: CONTINUE_NOTE }],
+        messages: [...request.messages, { role: 'assistant', content: endOf(soFar) }, { role: 'user', content: CONTINUE_NOTE }],
         signal, purpose: 'continue',
-        onText: (part) => onText(joinContinuation(text, part)),
+        onText: (part) => onText(joinContinuation(soFar, part)),
       });
     } catch (error) {
       if (signal.aborted) throw error;
       // Keep what the reader already has rather than losing the whole answer.
       break;
     }
-    text = joinContinuation(text, next.text ?? '');
+    text = joinContinuation(soFar, next.text ?? '');
     limited = next.limited === true;
     model = next.model ?? model;
+    // Nothing new arrived, so the model has said all it is going to: asking
+    // again would only put another request in the queue.
+    if (text.length <= soFar.length) break;
   }
   const answer = { ...first, text: text.slice(0, OUTPUT_LIMIT) };
   if (limited) answer.limited = true;
@@ -140,7 +156,13 @@ function teamStep(role, model) {
 }
 
 const CONTINUE_NOTE = 'Continue exactly where the previous answer stopped. Do not repeat anything, do not apologise, and do not start over.';
-const CONTINUE_ROUNDS = 2;
+// A long answer is finished in as many passes as it takes; the reader should
+// never have to ask. Eight passes is the ceiling before the reply is simply long.
+const CONTINUE_ROUNDS = 8;
+// A pass only needs the end of the answer so far: the whole answer can be far
+// larger than the model's context, and the rest is already on the page.
+const CONTINUE_TAIL = 4000;
+const endOf = (text) => (text.length > CONTINUE_TAIL ? text.slice(-CONTINUE_TAIL) : text);
 
 /** Joins a continuation onto the text it continues, without repeating a restarted answer. */
 export function joinContinuation(head, tail) {

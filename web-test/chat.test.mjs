@@ -39,6 +39,64 @@ test('an online turn does not include private local history, stopped replies, or
   assert.doesNotMatch(JSON.stringify(messages), /local answer|stopped partial answer/);
 });
 
+test('the on-device model reads the community turns already in the chat', () => {
+  const chat = createChat('x');
+  turn(chat, 'What is a rainbow?', 'Light bending in raindrops.', 'community');
+  turn(chat, 'And what is a local model?', 'One that runs here.', 'local');
+  newTurn(chat, 'Keep going on the local model.', 'local');
+  const local = JSON.stringify(conversationContext(chat, 'local'));
+  assert.match(local, /Light bending in raindrops\./);
+  assert.match(local, /One that runs here\./);
+  // The reverse must still never happen: a local answer never reaches the pool.
+  newTurn(chat, 'Ask the pool again?', 'community');
+  const online = JSON.stringify(conversationContext(chat, 'community'));
+  assert.match(online, /Light bending in raindrops\./);
+  assert.doesNotMatch(online, /One that runs here\./);
+});
+
+test('a follow-up keeps the question it refers to even when that answer was stopped', () => {
+  const chat = createChat('x');
+  turn(chat, 'Compare Postgres and MySQL for billing', 'Postgres is better becau', 'community', 'stopped');
+  // An answer that errored never wrote a word, but the question was still asked.
+  turn(chat, 'Which licence does Postgres use?', '', 'community', 'error');
+  newTurn(chat, 'So which one did you pick, and why?', 'community');
+  const messages = conversationContext(chat, 'community');
+  assert.deepEqual(messages.slice(1).map((m) => m.content), [
+    'Compare Postgres and MySQL for billing',
+    'Which licence does Postgres use?',
+    'So which one did you pick, and why?',
+  ]);
+  // A half-written answer is not passed off as one, and still nothing local.
+  assert.doesNotMatch(JSON.stringify(messages), /Postgres is better becau/);
+});
+
+test('every model in a team reads the earlier turns, not only the draft it is given', async () => {
+  const chat = createChat('x');
+  turn(chat, 'Earlier question about caching', 'A cache keeps a reusable copy.');
+  newTurn(chat, 'And what about invalidation?', 'community');
+  const messages = conversationContext(chat, 'community');
+  const seen = [];
+  await answerChat({
+    messages, signal: signal(), deep: true,
+    generate: async (request) => {
+      seen.push(request);
+      if (request.purpose === 'draft') return { text: 'Draft text', model: 'model-a' };
+      if (request.purpose === 'review') return { text: 'Review notes', model: 'model-b' };
+      return { text: 'Final text', model: 'model-c' };
+    },
+  });
+  assert.deepEqual(seen.map((r) => r.purpose), ['draft', 'review', 'final']);
+  for (const request of seen) {
+    const contents = request.messages.map((m) => m.content);
+    assert.ok(contents.includes('Earlier question about caching'), `${request.purpose} lost the earlier question`);
+    assert.ok(contents.some((c) => c.includes('A cache keeps a reusable copy.')), `${request.purpose} lost the earlier answer`);
+    assert.match(request.messages[0].content, /conversation so far/, `${request.purpose} lost the conversation rules`);
+  }
+  // The two checking models keep their role instructions as well.
+  assert.match(seen[1].messages[0].content, /second of three/);
+  assert.match(seen[2].messages[0].content, /third of three/);
+});
+
 test('normal chat asks a single model and passes live output through', async () => {
   const emitted = [];
   const result = await answerChat({
@@ -201,15 +259,64 @@ test('a failed continuation keeps the part that already streamed', async () => {
   assert.equal(result.limited, true);
 });
 
-test('a reply that is still cut off after the extra rounds keeps the limit note', async () => {
+test('a reply is continued as many times as the model still has something to add', async () => {
+  let calls = 0;
+  const parts = [];
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async (request) => {
+      calls++;
+      request.onText?.(`part ${calls} `);
+      if (request.purpose === 'continue') parts.push(request.messages.at(-2).content);
+      return { text: `part ${calls} `, model: 'model-a', limited: calls < 4 };
+    },
+  });
+  assert.equal(calls, 4);
+  assert.equal(result.limited, undefined);
+  assert.equal(result.text, 'part 1 part 2 part 3 part 4 ');
+  // Each pass is handed the answer so far.
+  assert.deepEqual(parts, ['part 1 ', 'part 1 part 2 ', 'part 1 part 2 part 3 ']);
+});
+
+test('a model that keeps asking for more room cannot loop forever', async () => {
   let calls = 0;
   const result = await answerChat({
     messages: [{ role: 'user', content: 'hi' }], signal: signal(),
     generate: async () => { calls++; return { text: `part ${calls} `, model: 'model-a', limited: true }; },
   });
-  assert.equal(calls, 3);
+  assert.equal(calls, 9);
   assert.equal(result.limited, true);
-  assert.equal(result.text, 'part 1 part 2 part 3 ');
+  assert.equal(result.text, 'part 1 part 2 part 3 part 4 part 5 part 6 part 7 part 8 part 9 ');
+});
+
+test('a model that adds nothing ends the passes instead of queueing more', async () => {
+  let calls = 0;
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async () => { calls++; return { text: calls === 1 ? 'Half' : '   ', model: 'model-a', limited: true }; },
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.text, 'Half');
+  assert.equal(result.limited, true);
+});
+
+test('a long answer hands the next pass only its end, not the whole of it', async () => {
+  const long = 'x'.repeat(9000);
+  let handed = '';
+  const result = await answerChat({
+    messages: [{ role: 'user', content: 'hi' }], signal: signal(),
+    generate: async (request) => {
+      if (request.purpose === 'continue') {
+        handed = request.messages.at(-2).content;
+        return { text: 'y', model: 'model-a' };
+      }
+      return { text: long, model: 'model-a', limited: true };
+    },
+  });
+  assert.equal(handed.length, 4000);
+  assert.equal(handed, long.slice(-4000));
+  assert.equal(result.text, `${long}y`);
+  assert.equal(result.limited, undefined);
 });
 
 test('a normal question has one model draft and a second model finish it', async () => {
