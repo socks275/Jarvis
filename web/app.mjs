@@ -4,6 +4,7 @@ import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orde
 import { communityEngine, getOnlineModels } from './community.mjs';
 import { browserEngine, validateModel } from './engine.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
+import { buildGame, isGameRequest, pickTheme, themeName } from './game.mjs';
 import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, testConnector, writeConnectors } from './connectors.mjs';
 import { OAUTH_STATE_KEY, authorizeUrl, cleanUrl, readCallback, redeemCode } from './oauth.mjs';
 
@@ -851,6 +852,9 @@ function tryReply(action) {
     const play = playRequest(text);
     if (play) { startPlay(text, play); return; }
   }
+  // A 3D game is a known build, not a guess: it is assembled here, runs in the
+  // canvas straight away, and needs no queue or model.
+  if (!retry && isGameRequest(text)) { startGame(text); return; }
   if (engine === 'community' && !communityAllowed) {
     consentAction = action;
     $('consent-dialog').showModal();
@@ -958,6 +962,42 @@ async function startPlay(text, play) {
 
 // No key needed: public front-ends answer the search when they can, and the
 // card offers another attempt when none of them do.
+// A complete 3D shooter, written by hand and handed over in one piece. Models
+// on a free network cannot reliably produce a working game in one pass, so the
+// engine lives here and every reply is something that actually runs.
+function startGame(text) {
+  drafts.delete(current?.id ?? '');
+  if (!current) {
+    current = createChat(text);
+    chats = [current, ...orderedChats(chats).slice(0, 31)];
+    urlForChat(current);
+  }
+  const theme = pickTheme(text);
+  const html = buildGame(theme);
+  const name = themeName(theme);
+  const reply = newTurn(current, text, engine);
+  prompt.value = '';
+  sizePrompt();
+  paintComposer();
+  const summary = `Built a complete 3D first-person shooter as one HTML file: WebGL, no libraries and no assets. Arena theme: ${name}. It is open in the canvas; press Run, click the view to lock the mouse, and play with WASD, mouse and click. Score, waves, enemy orbs and health pickups are included.`;
+  Object.assign(reply, {
+    status: 'complete',
+    summary,
+    text: `${summary}
+
+\`\`\`html
+${html}
+\`\`\``,
+  });
+  reply.game = { theme };
+  current.updatedAt = Date.now();
+  save();
+  paintView(true);
+  paintHistory();
+  openCanvas({ code: html, language: 'html' });
+  $('announcer').textContent = 'The game is ready in the canvas. Press Run to play.';
+}
+
 async function findVideo(reply) {
   reply.status = 'pending';
   paintView(true);

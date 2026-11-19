@@ -47,6 +47,16 @@ test('a follow-up includes recent messages with user and assistant roles', () =>
   ]);
 });
 
+test('a long artifact is summarised for the conversation, not pasted whole', () => {
+  const chat = createChat('x');
+  const reply = turn(chat, 'make a 3d shooter', `${'<'.repeat(50)} a very long game file`);
+  reply.summary = 'Built a complete 3D shooter as one HTML file.';
+  newTurn(chat, 'can it have a shotgun?', 'community');
+  const messages = conversationContext(chat, 'community');
+  assert.equal(messages[2].content, 'Built a complete 3D shooter as one HTML file.');
+  assert.doesNotMatch(JSON.stringify(messages), /a very long game file/);
+});
+
 test('an online turn does not include private local history, stopped replies, or older context', () => {
   const chat = createChat('First chat');
   turn(chat, 'User text', 'private local answer', 'local');

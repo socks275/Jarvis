@@ -94,7 +94,10 @@ export function conversationContext(chat, engine) {
     const readable = assistant?.engine === engine || (engine === 'local' && assistant?.engine === 'community');
     if (user?.role !== 'user' || !readable) continue;
     if (assistant.status === 'complete' && assistant.text) {
-      pairs.push([{ role: 'user', content: user.text }, { role: 'assistant', content: assistant.text }]);
+      // A reply can carry a short summary for the conversation while the page
+      // still holds a long artifact (a whole game, for instance).
+      const said = typeof assistant.summary === 'string' && assistant.summary ? assistant.summary : assistant.text;
+      pairs.push([{ role: 'user', content: user.text }, { role: 'assistant', content: said }]);
     } else if (assistant.status === 'stopped' || assistant.status === 'error') {
       // The answer never finished, but the question is still part of the chat:
       // a follow-up like "which one did you pick?" makes no sense without it.
@@ -331,6 +334,7 @@ function validChat(item) {
       && (i % 2 ? m.role === 'assistant' && isStatus(m.status) && isEngine(m.engine)
         && (m.model === undefined || isText(m.model, 300)) && (m.warning === undefined || isText(m.warning, 600))
         && (m.deep === undefined || typeof m.deep === 'boolean') && (m.limited === undefined || typeof m.limited === 'boolean')
+        && (m.summary === undefined || isText(m.summary, 600))
         && (m.video === undefined || (m.video && typeof m.video === 'object'
           && (m.video.id === undefined || isText(m.video.id, 20)) && (m.video.query === undefined || isText(m.video.query, 200))
           && (m.video.title === undefined || isText(m.video.title, 300))

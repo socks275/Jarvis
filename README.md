@@ -29,6 +29,19 @@ Code is not a side case. A message that is about code — a language, a library,
 
 Long code answers can be opened in the canvas (**Canvas and video** below) and run from there.
 
+### 3D games
+
+Ask for a 3D shooter — *“make a 3d shooter in html”*, *“build me a first-person game”*, *“code a 3d fps”* — and Chorus builds a complete one instead of describing how to write it. The reply carries the whole game as a single HTML file and opens it in the canvas; press **Run**, click the view to lock the mouse, and play.
+
+What you get is a real game, not a demo stub:
+
+- **WebGL rendering** with flat shading and fog — an arena, pillars, crates, no libraries and no assets to download.
+- **First-person controls**: WASD or the arrow keys, mouse look (pointer lock), **Shift** to sprint, **Space** to jump, click to fire, **R** to restart, **Esc** to release the cursor.
+- **Waves of enemies** that chase you, shoot orbs, and take damage from your bullets. Score, a health bar, out-of-the-way health pickups and a death screen are all included, as are short synthesised sounds for firing, hits and damage.
+- **Five looks** chosen from your words: *Neon Arena* (default), *Orbital Deck* (space), *Deep Vault* (dungeon), *Frost Line* (ice) and *Dust Sector* (desert).
+
+Because the game is assembled here rather than sampled from a model, it is instant, needs no queue, and always runs. This is deliberately narrow: it builds a shooter arena. For anything else, ask normally and the models will write code you can open in the canvas.
+
 ## Canvas and video
 
 Any code block in a reply has a **Canvas** button. It opens a side panel with a live preview for HTML, CSS and JavaScript, next to an editor you can change and re-run, plus copy and download. The preview runs in a sandboxed frame, so it can’t read your chats or browser storage. Other languages open in the canvas as editable text.
