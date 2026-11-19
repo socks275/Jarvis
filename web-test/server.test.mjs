@@ -22,6 +22,8 @@ test('preview serves static assets on proxy hosts and not files outside the site
     const home = await fetch(url, { headers: { Host: '3000-test.e2b.app' } });
     assert.equal(home.status, 200);
     assert.equal(home.headers.get('x-frame-options'), null);
+    // YouTube rejects embeds that arrive with no referrer (error 153).
+    assert.equal(home.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
     assert.match(await home.text(), /Chorus/);
     const script = await fetch(`${url}/app.mjs`);
     assert.match(script.headers.get('content-type'), /javascript/);

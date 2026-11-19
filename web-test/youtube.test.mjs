@@ -42,8 +42,8 @@ test('asks every instance at once and keeps the plain phrase when it can', async
 });
 
 test('builds embed, thumbnail and search links', () => {
-  assert.equal(embedUrl('dQw4w9WgXcQ'), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&modestbranding=1&autoplay=1');
-  assert.equal(embedUrl('dQw4w9WgXcQ', { auto: false }), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&modestbranding=1');
+  assert.equal(embedUrl('dQw4w9WgXcQ'), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&playsinline=1&autoplay=1');
+  assert.equal(embedUrl('dQw4w9WgXcQ', { auto: false }), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&playsinline=1');
   assert.equal(thumbnailUrl('dQw4w9WgXcQ'), 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
   assert.equal(searchUrl('lofi hip hop'), 'https://www.youtube.com/results?search_query=lofi%20hip%20hop');
 });

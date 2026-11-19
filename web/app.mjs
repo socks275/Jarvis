@@ -350,6 +350,10 @@ function videoCard(video, { pending = false, onRetry } = {}) {
     poster.addEventListener('click', () => {
       const player = el('iframe', 'video-player');
       player.src = embedUrl(video.id);
+      // Without a referrer YouTube answers with "Video player configuration
+      // error" (153) instead of playing.
+      player.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      player.referrerPolicy = 'strict-origin-when-cross-origin';
       player.title = video.title || 'YouTube video';
       player.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
       player.allowFullscreen = true;
