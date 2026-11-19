@@ -94,7 +94,8 @@ async function streamReply(response, signal, onText, onQueue) {
     if (event === '[DONE]') { done = true; return; }
     let payload;
     try { payload = JSON.parse(event); } catch { throw interrupted(); }
-    if (payload?.error) throw interrupted();
+    // Before any words arrived nothing was interrupted; say what happened instead.
+    if (payload?.error) throw text ? interrupted() : new CommunityError('The online model stopped before it wrote anything. Try again in a moment.');
     if (typeof payload?.model === 'string') model = payload.model.trim().slice(0, 300);
     const choice = payload?.choices?.[0];
     if (choice?.finish_reason) finish = choice.finish_reason;
@@ -105,21 +106,41 @@ async function streamReply(response, signal, onText, onQueue) {
       onText(text);
     }
   }
+  function drain(last = false) {
+    let next;
+    while (!done && (next = buffer.indexOf('\n')) !== -1) {
+      const raw = buffer.slice(0, next).replace(/\r$/, '');
+      buffer = buffer.slice(next + 1);
+      line(raw);
+    }
+    // The closing event of a stream sometimes arrives without its newline, so
+    // take whatever is left once the body is over instead of dropping it.
+    if (last && !done && buffer) {
+      const raw = buffer.replace(/\r$/, '');
+      buffer = '';
+      line(raw);
+    }
+    // An event is handed over on its blank line, so a body that stops right
+    // after a data line still has one event waiting to be read.
+    if (last && !done && data.length) line('');
+  }
   try {
     while (!done) {
       const chunk = await reader.read();
       signal.throwIfAborted();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let next;
-      while (!done && (next = buffer.indexOf('\n')) !== -1) {
-        const raw = buffer.slice(0, next).replace(/\r$/, '');
-        buffer = buffer.slice(next + 1);
-        line(raw);
+      if (chunk.done) {
+        buffer += decoder.decode();
+        drain(true);
+        break;
       }
+      buffer += decoder.decode(chunk.value, { stream: true });
+      drain();
       if (buffer.length > 128_000 || data.length > 64) throw interrupted();
     }
-    if (!done || !finish) throw interrupted();
+    // A finish_reason or a [DONE] sentinel is the provider saying the message is
+    // complete. Some releases close the body after the finish_reason and never
+    // send [DONE]; a finished reply is not an interrupted one.
+    if (!done && !finish) throw interrupted();
     return reply(text, model, capped ? 'length' : finish);
   } finally {
     // Close the body when a stream ends early or the user stops it.

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { communityEngine, getOnlineModels, planCommunityRequest } from '../web/community.mjs';
+import { answerChat } from '../web/chat.mjs';
 
 const api = 'https://oai.aihorde.net/v1';
 const signal = () => new AbortController().signal;
@@ -115,6 +116,26 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
   assert.deepEqual(result, { text: 'Light bends 🌈 in raindrops.', model: 'worker/B', limited: true });
 });
 
+test('a reply the provider finished without a closing sentinel is not called interrupted', async () => {
+  const bodies = [
+    // Some releases close the body right after the finish_reason.
+    [event({ choices: [{ delta: { content: 'All done' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] })],
+    // The closing event arrives without its final newline.
+    [event({ choices: [{ delta: { content: 'All done' } }] }), 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}'],
+    // [DONE] itself can be the unterminated last line.
+    [event({ choices: [{ delta: { content: 'All done' } }] }), 'data: [DONE]'],
+  ];
+  for (const events of bodies) {
+    const { generate } = communityEngine({ fetchImpl: async (url) => url.endsWith('/models')
+      ? list(card('worker/A'))
+      : stream(events) });
+    const result = await generate({ messages, purpose: 'answer', signal: signal() });
+    assert.equal(result.text, 'All done');
+    assert.equal(result.model, undefined);
+    assert.equal(result.limited, false);
+  }
+});
+
 test('a refused or broken stream does not report success or send a duplicate request', async () => {
   for (const trailer of [[], [event({ error: { code: 'ChatStreamDiverged' } }), 'data: [DONE]\n\n']]) {
     let posts = 0;
@@ -183,4 +204,22 @@ test('Stop aborts the request', async () => {
   await waiting;
   controller.abort();
   await assert.rejects(reply, { name: 'AbortError' });
+});
+
+test('the page shows the finished reply when a provider closes without [DONE]', async () => {
+  const { generate } = communityEngine({ fetchImpl: async (url) => url.endsWith('/models')
+    ? list(card('worker/A'))
+    : stream([
+      event({ model: 'worker/A', choices: [{ delta: { content: 'Rainbows come from ' } }] }),
+      event({ model: 'worker/A', choices: [{ delta: { content: 'light bending in raindrops.' } }] }),
+      event({ model: 'worker/A', choices: [{ delta: {}, finish_reason: 'stop' }] }),
+    ]) });
+  const answer = await answerChat({
+    messages, mode: 'solo', signal: signal(), generate,
+    onText: () => {},
+  });
+  assert.equal(answer.text, 'Rainbows come from light bending in raindrops.');
+  assert.equal(answer.model, 'worker/A');
+  assert.equal(answer.warning, undefined);
+  assert.equal(answer.limited, undefined);
 });
