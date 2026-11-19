@@ -139,6 +139,34 @@ export function newTurn(chat, text, engine, deep = false, raw = false) {
   return reply;
 }
 
+// Both are written by the person using the app, so they are cut short and
+// treated as instructions, never echoed back as conversation.
+const PERSONA_LIMIT = 600;
+const NOTE_LIMIT = 300;
+const oneLine = (value, limit) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
+
+/** The system message for one reply: base rules, code rules, then what the person asked for. */
+export function instructionsFor({ code = false, direct = false, persona = '', note = '' } = {}) {
+  const base = direct ? DIRECT_INSTRUCTIONS : INSTRUCTIONS;
+  const parts = [code ? `${base} ${CODE_RULES}` : base];
+  const about = oneLine(note, NOTE_LIMIT);
+  if (about) parts.push(`About this chat, written by the person: ${about}`);
+  const style = oneLine(persona, PERSONA_LIMIT);
+  if (style) parts.push(`How this person wants you to answer (follow it unless it contradicts the request): ${style}`);
+  return parts.join('\n');
+}
+
+/**
+ * Drops everything from `index` on, so the turn at `index` can be asked again
+ * with different words. The question being edited is included: it is replaced.
+ */
+export function rewindTo(chat, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= chat.messages.length || index % 2 !== 0) return false;
+  chat.messages.length = index;
+  chat.updatedAt = Date.now();
+  return true;
+}
+
 export function conversationContext(chat, engine) {
   const pairs = [];
   // This is called after appending the user message and a pending assistant reply.
@@ -167,14 +195,15 @@ export function conversationContext(chat, engine) {
   const recent = pairs.slice(-CONTEXT_TURNS).flat();
   const memo = condense(pairs.slice(0, Math.max(0, pairs.length - CONTEXT_TURNS)));
   // A connector puts what it fetched here, so the models can talk about it.
-  const live = typeof latest?.context === 'string' ? latest.context.trim().slice(0, 1800) : '';
+  const live = typeof latest?.context === 'string' ? latest.context.trim().slice(0, 5000) : '';
   const code = isCodeThread([...pairs.flat(), { role: 'user', content: latest?.text ?? '' }]);
   // The mode is a property of the reply being written, not a global switch:
   // turning it off later does not rewrite what an earlier reply was told.
-  const base = chat.messages.at(-1)?.raw === true ? DIRECT_INSTRUCTIONS : INSTRUCTIONS;
+  const reply = chat.messages.at(-1) ?? {};
+  const rules = instructionsFor({ code, direct: reply.raw === true, persona: reply.persona, note: chat.note });
   return [
-    { role: 'system', content: code ? `${base} ${CODE_RULES}` : base },
-    ...(live ? [{ role: 'system', content: `Live data fetched for this message from the user's connected account. Use it, and do not invent anything beyond it.\n${live}` }] : []),
+    { role: 'system', content: rules },
+    ...(live ? [{ role: 'system', content: `Live data fetched for this message: their connected account, or a page their message links to. Use it, quote it if it helps, and do not invent anything beyond it.\n${live}` }] : []),
     ...(memo ? [{ role: 'system', content: `Earlier in this conversation, condensed:\n${memo}` }] : []),
     ...recent,
     { role: 'user', content: latest.text },
@@ -458,11 +487,14 @@ const isStatus = (value) => ['pending', 'complete', 'stopped', 'error'].includes
 function validChat(item) {
   return item && isText(item.id, 150) && item.id.length > 0 && isText(item.title, 100) && item.title.trim()
     && isDate(item.createdAt) && isDate(item.updatedAt) && Array.isArray(item.messages)
+    && (item.note === undefined || isText(item.note, NOTE_LIMIT))
+    && (item.pinned === undefined || typeof item.pinned === 'boolean')
     && item.messages.length > 0 && item.messages.length <= MAX_TURNS * 2 && item.messages.length % 2 === 0
     && item.messages.every((m, i) => m && isText(m.id, 150) && isText(m.text, i % 2 ? OUTPUT_LIMIT : PROMPT_LIMIT)
       && (i % 2 ? m.role === 'assistant' && isStatus(m.status) && isEngine(m.engine)
         && (m.model === undefined || isText(m.model, 300)) && (m.warning === undefined || isText(m.warning, 600))
-        && (m.deep === undefined || typeof m.deep === 'boolean') && (m.raw === undefined || typeof m.raw === 'boolean') && (m.limited === undefined || typeof m.limited === 'boolean')
+        && (m.deep === undefined || typeof m.deep === 'boolean') && (m.raw === undefined || typeof m.raw === 'boolean')
+        && (m.persona === undefined || isText(m.persona, PERSONA_LIMIT)) && (m.limited === undefined || typeof m.limited === 'boolean')
         && (m.summary === undefined || isText(m.summary, 600))
         && (m.video === undefined || (m.video && typeof m.video === 'object'
           && (m.video.id === undefined || isText(m.video.id, 20)) && (m.video.query === undefined || isText(m.video.query, 200))
@@ -471,11 +503,12 @@ function validChat(item) {
         && (m.team === undefined || (Array.isArray(m.team) && m.team.length > 0 && m.team.length <= 4
           && m.team.every((s) => s && ['triage', 'answer', 'draft', 'review', 'final'].includes(s.role)
             && (s.model === undefined || isText(s.model, 300)) && (s.pick === undefined || MODES.includes(s.pick)))))
-        : m.role === 'user' && m.text.trim()));
+        : m.role === 'user' && m.text.trim() && (m.context === undefined || isText(m.context, 8000))));
 }
 
 export function orderedChats(chats) {
-  return [...chats].sort((a, b) => b.updatedAt - a.updatedAt);
+  // Pinned chats stay at the top of the list, newest first inside each group.
+  return [...chats].sort((a, b) => (b.pinned === true ? 1 : 0) - (a.pinned === true ? 1 : 0) || b.updatedAt - a.updatedAt);
 }
 
 export function saveChats(storage, chats) {
@@ -492,6 +525,28 @@ export function saveChats(storage, chats) {
     storage.setItem(HISTORY_KEY, `[${items.join(',')}]`);
     return true;
   } catch { return false; }
+}
+
+const exportDate = (value) => new Date(value).toISOString().slice(0, 10);
+
+/** A chat as Markdown: readable in any editor, with the models that wrote each reply. */
+export function chatToMarkdown(chat) {
+  const lines = [`# ${chat.title}`, '', `_${exportDate(chat.updatedAt)} · Chorus_`, ''];
+  for (const message of chat.messages) {
+    if (message.role === 'user') {
+      lines.push('## You', '', message.text.trim(), '');
+      continue;
+    }
+    const who = message.model ? `Chorus · ${message.model}` : 'Chorus';
+    const note = message.status === 'stopped' ? ' _(stopped)_' : message.status === 'error' ? ' _(failed)_' : '';
+    lines.push(`## ${who}`, '', note ? `${note.trim()}` : '', message.text.trim() || '_(no text)_', '');
+  }
+  return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`;
+}
+
+/** The raw shape as JSON, for anything that wants to re-import or process it. */
+export function chatToJson(chat) {
+  return JSON.stringify({ app: 'chorus', version: 1, chat }, null, 2);
 }
 
 function migrateRuns(storage) {

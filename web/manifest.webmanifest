@@ -1,0 +1,13 @@
+{
+  "name": "Chorus — many models, one answer",
+  "short_name": "Chorus",
+  "description": "A free chat app where several AI models answer together.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#17141f",
+  "theme_color": "#17141f",
+  "icons": [
+    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

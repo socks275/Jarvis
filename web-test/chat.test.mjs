@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerChat, cleanPrompt, conversationContext, createChat, HISTORY_KEY, isCodeRequest, isRefusal, joinContinuation, newTurn, planAnswer, readChats, readDecision, saveChats } from '../web/chat.mjs';
+import { answerChat, chatToJson, chatToMarkdown, cleanPrompt, conversationContext, createChat, HISTORY_KEY, instructionsFor, isCodeRequest, isRefusal, joinContinuation, newTurn, orderedChats, planAnswer, readChats, readDecision, rewindTo, saveChats } from '../web/chat.mjs';
 
 const signal = () => new AbortController().signal;
 const fakeStorage = () => {
@@ -687,4 +687,71 @@ test('a saved reply keeps the mode it was written in', () => {
   broken[0].messages[3].raw = 'yes';
   storage.setItem(HISTORY_KEY, JSON.stringify(broken));
   assert.deepEqual(readChats(storage), []);
+});
+
+test('what the person asked for rides along: their instructions and this chat’s note', () => {
+  const chat = createChat('x');
+  chat.note = 'We are migrating a Django app to FastAPI.';
+  turn(chat, 'How do I start?', 'Begin with the routers.');
+  newTurn(chat, 'And the models?', 'community', false, false);
+  chat.messages.at(-1).persona = 'Answer in British English. Show the code first.';
+  const rules = conversationContext(chat, 'community')[0].content;
+  assert.match(rules, /About this chat, written by the person: We are migrating a Django app to FastAPI\./);
+  assert.match(rules, /How this person wants you to answer.*British English/);
+  // The default still reads like the default.
+  const plain = createChat('y');
+  newTurn(plain, 'hi');
+  assert.doesNotMatch(conversationContext(plain, 'community')[0].content, /About this chat|How this person/);
+  // Long text is cut to the limit instead of being sent whole.
+  const capped = instructionsFor({ persona: 'x'.repeat(5000), note: 'y'.repeat(5000) });
+  assert.equal(capped.split('How this person wants you to answer')[1].trim().length, 600 + ' (follow it unless it contradicts the request):'.length);
+  assert.equal(capped.split('About this chat, written by the person: ')[1].split('\n')[0].length, 300);
+});
+
+test('a question can be asked again: the turn is replaced, not appended', () => {
+  const chat = createChat('x');
+  turn(chat, 'first question', 'first answer');
+  turn(chat, 'second question', 'second answer');
+  assert.equal(chat.messages.length, 4);
+  assert.equal(rewindTo(chat, 2), true);
+  assert.equal(chat.messages.length, 2);
+  newTurn(chat, 'second question, better', 'community');
+  assert.equal(chat.messages.length, 4);
+  assert.equal(chat.messages[2].text, 'second question, better');
+  // Only user turns exist at even indexes, and nothing else rewinds.
+  assert.equal(rewindTo(chat, 1), false);
+  assert.equal(rewindTo(chat, 99), false);
+  assert.equal(rewindTo(chat, -1), false);
+  assert.equal(chat.messages.length, 4);
+});
+
+test('a chat leaves the browser as readable Markdown or as its own JSON', () => {
+  const chat = createChat('How do I sort a dict?');
+  turn(chat, 'How do I sort a dict?', 'Use `sorted(d.items(), key=lambda kv: kv[1])`.');
+  chat.messages[1].model = 'small/Model-7B';
+  const markdown = chatToMarkdown(chat);
+  assert.match(markdown, /^# How do I sort a dict\?/);
+  assert.match(markdown, /## You\n\nHow do I sort a dict\?/);
+  assert.match(markdown, /## Chorus · small\/Model-7B\n\nUse `sorted/);
+  const json = JSON.parse(chatToJson(chat));
+  assert.equal(json.app, 'chorus');
+  assert.equal(json.chat.messages.length, 2);
+});
+
+test('pinned chats stay at the top, and notes and pins survive a reload', () => {
+  const older = createChat('older'); older.updatedAt = 100;
+  const newer = createChat('newer'); newer.updatedAt = 200;
+  assert.deepEqual(orderedChats([older, newer]).map((c) => c.title), ['newer', 'older']);
+  older.pinned = true;
+  assert.deepEqual(orderedChats([older, newer]).map((c) => c.title), ['older', 'newer']);
+
+  const storage = fakeStorage();
+  const chat = createChat('pinned chat');
+  turn(chat, 'pinned chat', 'an answer');
+  chat.pinned = true;
+  chat.note = 'A note for the models';
+  saveChats(storage, [chat]);
+  const [saved] = readChats(storage);
+  assert.equal(saved.pinned, true);
+  assert.equal(saved.note, 'A note for the models');
 });

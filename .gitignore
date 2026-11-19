@@ -13,3 +13,6 @@ config/
 
 # Generated static website
 dist/
+
+# Local end-to-end harnesses
+.arena/
