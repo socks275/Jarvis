@@ -1,0 +1,9 @@
+# Deploy with: npx wrangler deploy relay/wrangler.toml
+# Secrets: npx wrangler secret put GITHUB_CLIENT_ID --name chorus-oauth   (and _SECRET)
+name = "chorus-oauth"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Where Chorus is served. Comma separate more than one origin.
+ALLOWED_ORIGIN = "https://your-name.github.io"

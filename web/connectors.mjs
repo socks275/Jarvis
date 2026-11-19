@@ -20,7 +20,7 @@ export const SERVICES = [
       ],
       connect: 'Sign in with GitHub',
       // Remembered for display only: the account the token belongs to.
-      keep: [{ key: 'login' }],
+      keep: [{ key: 'login' }, { key: 'avatar' }],
       tokenPage: 'https://github.com/settings/tokens/new?scopes=repo,read:user&description=Chorus',
     },
     examples: ['list my GitHub repos', 'GitHub commits in owner/repo'],
@@ -334,7 +334,11 @@ export async function githubIdentity(token, { fetchImpl = globalThis.fetch, sign
   if (!response.ok) return undefined;
   const data = await response.json().catch(() => ({}));
   const login = typeof data?.login === 'string' ? data.login : undefined;
-  return login ? { login } : undefined;
+  if (!login) return undefined;
+  const avatar = typeof data?.avatar_url === 'string' && /^https:\/\/avatars\.githubusercontent\.com\//.test(data.avatar_url)
+    ? data.avatar_url
+    : undefined;
+  return { login, ...(avatar ? { avatar } : {}) };
 }
 
 /** Runs one parsed request and returns what the chat card should show. */

@@ -8,7 +8,7 @@
   <!-- YouTube refuses to play an embed that arrives without a referrer
        (error 153), so state the policy here instead of inheriting one. -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
@@ -217,6 +217,19 @@
     <div class="dialog-top"><h2 id="options-title">Chat options</h2><button type="button" class="icon-button" data-close aria-label="Close chat options"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <label class="text-label" for="rename-input">Chat title</label><input type="text" id="rename-input" class="text-field" maxlength="80" autofocus>
     <div class="dialog-actions split"><button type="button" class="button border-button danger-text" id="delete-chat"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete chat</button><button type="button" class="button primary" id="save-title">Save title</button></div>
+  </dialog>
+
+  <dialog class="dialog" id="github-setup" aria-labelledby="github-setup-title">
+    <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close GitHub sign-in help" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <h2 id="github-setup-title">How GitHub sign-in works</h2>
+    <p>A page cannot swap a GitHub code for a token: the exchange needs your OAuth app's secret, and GitHub's sign-in endpoint refuses browser calls. So one small relay holds the secret, and Chorus talks only to it.</p>
+    <ol class="setup-steps">
+      <li><a href="https://github.com/settings/developers" target="_blank" rel="noopener noreferrer">Create an OAuth App</a> in your GitHub account and set its callback to this page's address.</li>
+      <li><a href="https://deploy.workers.cloudflare.com/?url=https://github.com/socks275/Jarvis/tree/main/relay" target="_blank" rel="noopener noreferrer">Deploy the relay</a>, then set <code>GITHUB_CLIENT_ID</code>, <code>GITHUB_CLIENT_SECRET</code> and <code>ALLOWED_ORIGIN</code>.</li>
+      <li>Paste the client ID and the relay address below, then press <strong>Sign in with GitHub</strong>.</li>
+    </ol>
+    <p class="fine-print">The secret stays in the relay, never here. And if you would rather not set this up, a personal access token uses the same connector.</p>
+    <div class="dialog-actions"><button type="button" class="button primary" data-close>Got it</button></div>
   </dialog>
 
   <dialog class="dialog" id="remove-dialog" aria-labelledby="remove-title">

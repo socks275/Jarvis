@@ -279,7 +279,17 @@ function paintConnectors() {
     head.append(el('small', 'connector-status', service.fields.length ? (on ? 'Connected' : 'Not connected') : 'Public · no key needed'));
     box.append(head, el('p', 'fine-print', service.blurb));
     if (service.id === 'github' && saved.login) {
-      box.append(el('p', 'connector-account', `Connected as @${saved.login}`));
+      const who = el('p', 'connector-account');
+      if (saved.avatar) {
+        const picture = el('img', 'connector-avatar');
+        picture.src = saved.avatar;
+        picture.alt = '';
+        picture.width = 18;
+        picture.height = 18;
+        who.append(picture);
+      }
+      who.append(el('span', '', `Connected as @${saved.login}`));
+      box.append(who);
     }
     for (const field of [...service.fields, ...(service.oauth?.fields ?? [])]) {
       const secret = field.key === 'token' || field.key === 'key';
@@ -303,7 +313,10 @@ function paintConnectors() {
       instead.href = service.oauth.tokenPage;
       instead.target = '_blank';
       instead.rel = 'noopener noreferrer';
-      oauthActions.append(start, instead);
+      const help = el('button', 'text-action', 'How this works');
+      help.type = 'button';
+      help.dataset.oauthHelp = service.oauth.provider;
+      oauthActions.append(start, instead, help);
       box.append(oauthActions);
       box.append(el('p', 'fine-print', 'Sign-in runs through a relay you deploy once, because GitHub will not swap a code for a token inside a browser. The README has the whole function.'));
     }
@@ -1092,13 +1105,17 @@ async function verifyGithub() {
     toast('GitHub did not accept that token.');
     return;
   }
-  if (connectors.github.login === who.login) return;
-  connectors = { ...connectors, github: { ...connectors.github, login: who.login } };
+  if (connectors.github.login === who.login && connectors.github.avatar === who.avatar) return;
+  connectors = { ...connectors, github: { ...connectors.github, login: who.login, ...(who.avatar ? { avatar: who.avatar } : {}) } };
   writeConnectors(storage, connectors);
   paintConnectors();
 }
 
 $('connector-list').addEventListener('click', (event) => {
+  if (event.target.closest('[data-oauth-help]')) {
+    $('github-setup').showModal();
+    return;
+  }
   const start = event.target.closest('[data-oauth-start]');
   if (start) {
     const service = SERVICES.find(({ id }) => id === start.dataset.oauthStart);

@@ -42,7 +42,7 @@ A connector only answers when the service is named in the message, so an ordinar
 
 A pasted token is the quick path, and **Sign in with GitHub** is the real OAuth one. There is one thing that cannot be designed away: GitHub's sign-in endpoints send no CORS headers ([github/isaacs#330](https://github.com/isaacs/github/issues/330)), so a browser is not allowed to swap an OAuth code for a token. The exchange has to happen somewhere that can hold the client secret. That is the relay — deploy it once, and Chorus never sees the secret.
 
-A Cloudflare Worker is enough (free tier):
+The relay lives in [`relay/`](relay/) — [deploy it to Cloudflare Workers with one press](https://deploy.workers.cloudflare.com/?url=https://github.com/socks275/Jarvis/tree/main/relay), or paste the file yourself. It is one small function and it never stores anything:
 
 ```js
 export default {
@@ -67,7 +67,7 @@ export default {
 };
 ```
 
-1. Create an OAuth App at [github.com/settings/developers](https://github.com/settings/developers) and set its callback to the URL you open Chorus at.
+1. Create an OAuth App at [github.com/settings/developers](https://github.com/settings/developers) and set its callback to the URL you open Chorus at. In Chorus, **Settings → Connectors → GitHub → How this works** repeats these steps.
 2. Deploy the worker with `ALLOWED_ORIGIN`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` set as secrets.
 3. In Settings → Connectors → GitHub, paste the client ID and the worker URL, then press **Sign in with GitHub**.
 

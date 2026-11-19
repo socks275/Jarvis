@@ -170,3 +170,10 @@ test('keeps the OAuth settings next to the token', () => {
     clientId: 'Iv1.abc', relay: 'https://relay.test', login: 'socks275',
   });
 });
+
+test('keeps the GitHub avatar only from GitHub itself', async () => {
+  const fine = await githubIdentity('ghp', { fetchImpl: async () => Response.json({ login: 'ada', avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4' }) });
+  assert.deepEqual(fine, { login: 'ada', avatar: 'https://avatars.githubusercontent.com/u/1?v=4' });
+  const odd = await githubIdentity('ghp', { fetchImpl: async () => Response.json({ login: 'ada', avatar_url: 'https://evil.test/a.png' }) });
+  assert.deepEqual(odd, { login: 'ada' });
+});
