@@ -153,13 +153,18 @@ export function conversationContext(chat, engine) {
       pairs.push([{ role: 'user', content: user.text }]);
     }
   }
+  // Turns older than the window are not lost: they are condensed into one
+  // system line, so a long conversation keeps its thread without a model call.
+  const recent = pairs.slice(-CONTEXT_TURNS).flat();
+  const memo = condense(pairs.slice(0, Math.max(0, pairs.length - CONTEXT_TURNS)));
   // A connector puts what it fetched here, so the models can talk about it.
   const live = typeof latest?.context === 'string' ? latest.context.trim().slice(0, 1800) : '';
   const code = isCodeThread([...pairs.flat(), { role: 'user', content: latest?.text ?? '' }]);
   return [
     { role: 'system', content: code ? `${INSTRUCTIONS} ${CODE_RULES}` : INSTRUCTIONS },
     ...(live ? [{ role: 'system', content: `Live data fetched for this message from the user's connected account. Use it, and do not invent anything beyond it.\n${live}` }] : []),
-    ...pairs.slice(-CONTEXT_TURNS).flat(),
+    ...(memo ? [{ role: 'system', content: `Earlier in this conversation, condensed:\n${memo}` }] : []),
+    ...recent,
     { role: 'user', content: latest.text },
   ];
 }
@@ -171,6 +176,26 @@ export function estimateTokens(messages) {
 
 export function shorterContext(messages) {
   return messages.length > 2 ? [messages[0], ...messages.slice(3)] : messages;
+}
+
+const DIGEST_CHARS = 900;
+const DIGEST_QUESTION = 150;
+const DIGEST_ANSWER = 190;
+
+/** One line per older turn, newest kept first, inside a fixed budget. */
+function condense(pairs) {
+  const lines = [];
+  let used = 0;
+  for (let i = pairs.length - 1; i >= 0; i--) {
+    const [asked, answered] = pairs[i];
+    const question = (asked?.content ?? '').replace(/\s+/g, ' ').trim().slice(0, DIGEST_QUESTION);
+    const answer = (answered?.content ?? '').replace(/\s+/g, ' ').trim().slice(0, DIGEST_ANSWER);
+    const line = answered ? `- they asked: ${question}\n  you answered: ${answer}` : `- they asked: ${question}`;
+    if (used + line.length > DIGEST_CHARS) break;
+    lines.unshift(line);
+    used += line.length + 1;
+  }
+  return lines.join('\n');
 }
 
 function followUp(messages, instruction, extra) {

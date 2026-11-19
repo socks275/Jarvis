@@ -57,17 +57,44 @@ test('a long artifact is summarised for the conversation, not pasted whole', () 
   assert.doesNotMatch(JSON.stringify(messages), /a very long game file/);
 });
 
-test('an online turn does not include private local history, stopped replies, or older context', () => {
+test('turns older than the window are condensed instead of forgotten', () => {
+  const chat = createChat('x');
+  for (let i = 0; i < 12; i++) turn(chat, `question ${i}`, `answer ${i}`);
+  newTurn(chat, 'latest', 'community');
+  const messages = conversationContext(chat, 'community');
+  const digest = messages.find((m) => m.role === 'system' && m.content.startsWith('Earlier in this conversation'));
+  assert.ok(digest, 'no digest');
+  assert.match(digest.content, /question 0/);
+  assert.match(digest.content, /answer 0/);
+  // The recent turns are still sent in full, and the digest does not repeat them.
+  assert.equal(messages[2].content, 'question 5');
+  assert.doesNotMatch(digest.content, /question 5/);
+  // The digest stays inside its budget.
+  assert.ok(digest.content.length < 1000, String(digest.content.length));
+  // Everything is still in order: system, digest, then the recent turns.
+  assert.equal(messages[0].role, 'system');
+  assert.equal(messages[1], digest);
+  assert.equal(messages.at(-1).content, 'latest');
+});
+
+test('an online turn keeps no private local history and no half-written answers', () => {
   const chat = createChat('First chat');
   turn(chat, 'User text', 'private local answer', 'local');
   turn(chat, 'Interrupted prompt', 'stopped partial answer', 'community', 'stopped');
   for (let i = 0; i < 9; i++) turn(chat, `question ${i}`, `answer ${i}`);
   newTurn(chat, 'latest', 'community');
   const messages = conversationContext(chat, 'community');
-  assert.equal(messages.length, 16);
-  assert.equal(messages[1].content, 'question 2');
+  // A local answer and a cut-off answer never leave the machine.
+  assert.doesNotMatch(JSON.stringify(messages), /private local answer|stopped partial answer/);
+  // The question from the stopped turn is still there, and so are older turns.
+  const all = JSON.stringify(messages);
+  assert.match(all, /Interrupted prompt/);
+  assert.match(all, /question 0/);
+  // The window is still seven turns of full text: system, digest, 14 turns, latest.
+  assert.equal(messages.length, 17);
+  assert.equal(messages[0].role, 'system');
+  assert.match(messages[1].content, /^Earlier in this conversation/);
   assert.equal(messages.at(-1).content, 'latest');
-  assert.doesNotMatch(JSON.stringify(messages), /local answer|stopped partial answer/);
 });
 
 test('the on-device model reads the community turns already in the chat', () => {
