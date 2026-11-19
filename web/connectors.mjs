@@ -21,8 +21,11 @@ export const SERVICES = [
       connect: 'Sign in with GitHub',
       // Remembered for display only: the account the token belongs to.
       keep: [{ key: 'login' }, { key: 'avatar' }],
+      flags: ['allowWrite'],
       tokenPage: 'https://github.com/settings/tokens/new?scopes=repo,read:user&description=Chorus',
     },
+    flags: [{ key: 'allowWrite', label: 'Allow changes', hint: 'off until you tick it' }],
+    writes: ['open an issue in owner/repo: title', 'comment on owner/repo#12: text', 'set the description of owner/repo to …'],
     examples: ['list my GitHub repos', 'GitHub commits in owner/repo'],
   },
   {
@@ -73,6 +76,9 @@ export function readConnectors(storage) {
       const text = typeof entry[key] === 'string' ? entry[key].trim().slice(0, FIELD_LIMIT) : '';
       if (text) values[key] = text;
     }
+    for (const key of service.oauth?.flags ?? []) {
+      if (entry[key] === true) values[key] = true;
+    }
     if (Object.keys(values).length) saved[service.id] = values;
   }
   return saved;
@@ -101,10 +107,25 @@ const DOMAIN = /\b((?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|app|co|uk|xyz|me|site|
  * The service has to be named, so ordinary questions about GitHub or Reddit
  * still go to the model.
  */
+export const WRITE_ACTIONS = ['create-issue', 'comment', 'write-file', 'describe'];
+export const isWrite = (request) => Boolean(request) && WRITE_ACTIONS.includes(request.action);
+
+const REPO_PAIR = '([\\w.-]{1,60}/[\\w.-]{1,60})';
+
 export function parseConnectorRequest(text) {
   const value = String(text ?? '').trim();
-  if (!value || value.length > 320) return undefined;
+  if (!value || value.length > 900) return undefined;
   const lower = value.toLowerCase();
+
+  // Write requests first: they are explicit commands, and they say the repo.
+  const issue = new RegExp(`\\b(?:open|create|file|add|raise)\\s+(?:an?\\s+)?(?:new\\s+)?issue\\s+(?:in|on)\\s+${REPO_PAIR}\\s*[:\\-—,]?\\s*([\\s\\S]+)`, 'i').exec(value);
+  if (issue) return { service: 'github', action: 'create-issue', repo: issue[1], title: issue[2].trim().slice(0, 200) };
+  const comment = new RegExp(`\\bcomment\\s+on\\s+${REPO_PAIR}#(\\d{1,7})\\s*[:\\-—,]?\\s*([\\s\\S]+)`, 'i').exec(value);
+  if (comment) return { service: 'github', action: 'comment', repo: comment[1], number: Number(comment[2]), body: comment[3].trim().slice(0, 2000) };
+  const file = new RegExp(`\\b(?:create|write|update|add)\\s+(?:the\\s+)?file\\s+([\\w./-]{1,200})\\s+(?:in|to)\\s+${REPO_PAIR}\\s+(?:with|containing)?\\s*[:\\-—]?\\s*([\\s\\S]+)`, 'i').exec(value);
+  if (file) return { service: 'github', action: 'write-file', path: file[1], repo: file[2], content: file[3] };
+  const describe = new RegExp(`\\b(?:change|set|update)\\s+(?:the\\s+)?description\\s+(?:of|for)\\s+${REPO_PAIR}\\s+to\\s+([\\s\\S]+)`, 'i').exec(value);
+  if (describe) return { service: 'github', action: 'describe', repo: describe[1], description: describe[2].trim().slice(0, 350) };
   const repo = REPO.exec(value)?.[1];
   const table = TABLE.exec(value)?.[1];
   const subreddit = SUBREDDIT.exec(value)?.[1] ?? SUBREDDIT_WORD.exec(value)?.[1];
@@ -171,6 +192,13 @@ async function read(response, name) {
   return response.json();
 }
 
+function toBase64(text) {
+  const bytes = new TextEncoder().encode(String(text ?? ''));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary);
+}
+
 async function github(request, connectors, { fetchImpl, signal }) {
   const { token } = credentials(connectors, 'github');
   const headers = {
@@ -181,6 +209,66 @@ async function github(request, connectors, { fetchImpl, signal }) {
   const get = async (path) => read(await fetchImpl(`https://api.github.com${path}`, {
     headers, credentials: 'omit', signal,
   }), 'GitHub');
+
+  if (isWrite(request)) {
+    // Reading is harmless; writing is not. It stays off until it is turned on.
+    if (connectors?.github?.allowWrite !== true) {
+      throw new Error('Changes are switched off. Tick “Allow changes” in Settings → Connectors → GitHub, then ask again.');
+    }
+    const call = async (path, method, body) => read(await fetchImpl(`https://api.github.com${path}`, {
+      method,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'omit',
+      signal,
+    }), 'GitHub');
+
+    if (request.action === 'create-issue') {
+      const created = await call(`/repos/${request.repo}/issues`, 'POST', { title: request.title });
+      return {
+        service: 'github', title: `Opened an issue in ${request.repo}`, changed: true,
+        items: [{ title: flat(created?.title || request.title), detail: `#${created?.number ?? '?'} · just now`, url: created?.html_url ?? undefined }],
+      };
+    }
+    if (request.action === 'comment') {
+      const created = await call(`/repos/${request.repo}/issues/${request.number}/comments`, 'POST', { body: request.body });
+      return {
+        service: 'github', title: `Commented on ${request.repo}#${request.number}`, changed: true,
+        items: [{ title: flat(request.body, 180), detail: 'your comment', url: created?.html_url ?? undefined }],
+      };
+    }
+    if (request.action === 'describe') {
+      const updated = await call(`/repos/${request.repo}`, 'PATCH', { description: request.description });
+      return {
+        service: 'github', title: `Changed the description of ${request.repo}`, changed: true,
+        items: [{ title: flat(request.description, 180), detail: updated?.description ? 'saved' : 'cleared', url: updated?.html_url ?? undefined }],
+      };
+    }
+    // A file needs the current SHA to be replaced, and none to be created.
+    const existing = await fetchImpl(`https://api.github.com/repos/${request.repo}/contents/${request.path}`, {
+      headers, credentials: 'omit', signal,
+    });
+    let sha;
+    if (existing.ok) {
+      const data = await existing.json().catch(() => ({}));
+      sha = typeof data?.sha === 'string' ? data.sha : undefined;
+    } else if (existing.status !== 404) {
+      await read(existing, 'GitHub');
+    }
+    const saved = await call(`/repos/${request.repo}/contents/${request.path}`, 'PUT', {
+      message: `${sha ? 'Update' : 'Add'} ${request.path} from Chorus`,
+      content: toBase64(request.content),
+      ...(sha ? { sha } : {}),
+    });
+    return {
+      service: 'github', title: `${sha ? 'Updated' : 'Created'} ${request.path}`, changed: true,
+      items: [{
+        title: request.path,
+        detail: `${sha ? 'updated' : 'added'} in ${request.repo}`,
+        url: saved?.content?.html_url ?? saved?.commit?.html_url ?? undefined,
+      }],
+    };
+  }
 
   if (request.action === 'notifications') {
     const data = await get('/notifications?per_page=8');

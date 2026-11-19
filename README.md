@@ -38,6 +38,19 @@ Settings → **Connectors** links a chat to the services you already use:
 
 A connector only answers when the service is named in the message, so an ordinary question about GitHub still goes to the models. Chorus fetches the data itself, shows it in a card with links, and hands the same rows to the models as context so the reply can talk about them. Keys live in this browser's storage, are sent only to the service they belong to, and are never put in a chat message or sent to a model. Nothing is proxied through a server — each request goes straight from your browser, so a service that blocks cross-origin requests will report an error in the card instead of silently failing.
 
+### Editing, not just reading
+
+GitHub can also write, but only after you tick **Allow changes** on its card, and only for commands you type yourself. With it on:
+
+| You type | What happens |
+| --- | --- |
+| `open an issue in owner/repo: the button overlaps the text` | Creates the issue and links to it |
+| `comment on owner/repo#12: fixed in the latest build` | Posts the comment |
+| `create the file docs/hi.md in owner/repo with: hello` | Adds or replaces that file with a commit |
+| `set the description of owner/repo to …` | Changes the repository description |
+
+A write is never left to the models: the card reports exactly what changed, with a link to the issue, comment or commit, so nothing can be invented on top of it. The token needs the rights to do it — a classic token wants the **repo** scope, a fine-grained token wants **Contents: read and write** (files) and **Issues: write** — otherwise GitHub answers 403 and the card says so.
+
 ### Where to get the key
 
 - **GitHub** — [github.com/settings/tokens](https://github.com/settings/tokens) → *Generate new token*. A fine-grained token needs **Repository access** (the repos you want) and **Contents: read**; a classic token needs the **repo** and **read:user** scopes. Set an expiry — a week is enough for a try. In Chorus the GitHub card's *Get a token instead* link opens the form with those scopes already ticked.

@@ -319,6 +319,25 @@ function paintConnectors() {
       if (secret && saved[field.key]) label.append(el('span', 'connector-saved', 'saved'));
       box.append(label, input);
     }
+    for (const flag of service.flags ?? []) {
+      const wrap = el('label', 'connector-flag');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.id = `connector-${service.id}-${flag.key}`;
+      box.checked = saved[flag.key] === true;
+      box.addEventListener('change', () => {
+        connectors = { ...connectors, [service.id]: { ...connectors[service.id], [flag.key]: box.checked } };
+        writeConnectors(storage, connectors);
+        toast(box.checked
+          ? `${service.label} changes are on: a command in a chat will write to your account`
+          : `${service.label} changes are off again`);
+      });
+      wrap.append(box, el('span', '', flag.label));
+      if (flag.hint) wrap.append(el('small', 'connector-flag-hint', flag.hint));
+    }
+    if (service.writes?.length) {
+      box.append(el('p', 'fine-print connector-example', `Edits, when allowed: ${service.writes.map((line) => `“${line}”`).join(' · ')}`));
+    }
     if (service.tokenPage && !service.oauth) {
       const where = el('a', 'text-action', `Where do I find this? ${service.tokenLabel}`);
       where.href = service.tokenPage;
@@ -902,7 +921,8 @@ async function runConnectorTurn(text, request) {
     return;
   }
   reply.connector = result;
-  question.context = summarise(result);
+  // A write is reported by the card itself: a model retelling it could claim more.
+  question.context = result.changed ? '' : summarise(result);
   save();
   paintView(true);
   paintHistory();
@@ -1128,6 +1148,10 @@ function connectorValues(service) {
     if (value) values[field.key] = value;
     // An empty secret field means "keep the saved key"; Remove is how it goes.
     else if (!secret) delete values[field.key];
+  }
+  for (const flag of service.flags ?? []) {
+    const box = document.getElementById(`connector-${service.id}-${flag.key}`);
+    if (box) values[flag.key] = box.checked;
   }
   return values;
 }

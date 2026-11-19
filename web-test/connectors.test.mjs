@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CONNECTOR_KEY, SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise,
-  testConnector, writeConnectors,
+  CONNECTOR_KEY, SERVICES, githubIdentity, isConnected, isWrite, parseConnectorRequest, readConnectors, runConnector,
+  summarise, testConnector, writeConnectors,
 } from '../web/connectors.mjs';
 
 const fakeStorage = () => {
@@ -203,4 +203,96 @@ test('a test button proves each connector really works', async () => {
     fetchImpl: async () => new Response('{}', { status: 401 }),
   }), /Supabase answered with 401/);
   await assert.rejects(() => testConnector('cloudflare', {}), /Settings → Connectors/);
+});
+
+test('reads write commands, and keeps the repo and the words', () => {
+  const issue = parseConnectorRequest('open an issue in socks275/Jarvis: the delete button is too small');
+  assert.equal(issue.action, 'create-issue');
+  assert.equal(issue.repo, 'socks275/Jarvis');
+  assert.equal(issue.title, 'the delete button is too small');
+  assert.equal(isWrite(issue), true);
+
+  const comment = parseConnectorRequest('comment on socks275/Jarvis#12: thanks, fixed');
+  assert.deepEqual(comment, { service: 'github', action: 'comment', repo: 'socks275/Jarvis', number: 12, body: 'thanks, fixed' });
+
+  const file = parseConnectorRequest('create the file docs/hello.md in socks275/Jarvis with: hello world');
+  assert.equal(file.action, 'write-file');
+  assert.equal(file.path, 'docs/hello.md');
+  assert.equal(file.content, 'hello world');
+
+  const describe = parseConnectorRequest('set the description of socks275/Jarvis to a team of models');
+  assert.equal(describe.action, 'describe');
+  assert.equal(describe.description, 'a team of models');
+
+  assert.equal(isWrite(parseConnectorRequest('list my GitHub repos')), false);
+});
+
+test('writes are refused until changes are switched on', async () => {
+  await assert.rejects(() => runConnector({ service: 'github', action: 'create-issue', repo: 'a/b', title: 'x' },
+    { github: { token: 't' } }, { fetchImpl: async () => { throw new Error('must not run'); } }),
+  /Allow changes/);
+});
+
+test('opens an issue, comments and changes a description', async () => {
+  const creds = { github: { token: 't', allowWrite: true } };
+  const issue = await runConnector({ service: 'github', action: 'create-issue', repo: 'a/b', title: 'Hello' }, creds, {
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://api.github.com/repos/a/b/issues');
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), { title: 'Hello' });
+      return Response.json({ number: 7, title: 'Hello', html_url: 'https://github.com/a/b/issues/7' });
+    },
+  });
+  assert.equal(issue.changed, true);
+  assert.deepEqual(issue.items[0], { title: 'Hello', detail: '#7 · just now', url: 'https://github.com/a/b/issues/7' });
+
+  const comment = await runConnector({ service: 'github', action: 'comment', repo: 'a/b', number: 12, body: 'thanks' }, creds, {
+    fetchImpl: async (url) => {
+      assert.equal(url, 'https://api.github.com/repos/a/b/issues/12/comments');
+      return Response.json({ html_url: 'https://github.com/a/b/issues/12#issuecomment-1' });
+    },
+  });
+  assert.equal(comment.title, 'Commented on a/b#12');
+
+  const described = await runConnector({ service: 'github', action: 'describe', repo: 'a/b', description: 'new words' }, creds, {
+    fetchImpl: async (url, options) => {
+      assert.equal(options.method, 'PATCH');
+      assert.deepEqual(JSON.parse(options.body), { description: 'new words' });
+      return Response.json({ description: 'new words', html_url: 'https://github.com/a/b' });
+    },
+  });
+  assert.equal(described.title, 'Changed the description of a/b');
+});
+
+test('creates and then updates a file, using the sha of what is there', async () => {
+  const creds = { github: { token: 't', allowWrite: true } };
+  const created = await runConnector({ service: 'github', action: 'write-file', repo: 'a/b', path: 'docs/hi.md', content: 'hello' }, creds, {
+    fetchImpl: async (url, options) => {
+      if (!options?.method) return new Response('{}', { status: 404 });
+      assert.equal(options.method, 'PUT');
+      const sent = JSON.parse(options.body);
+      assert.equal(sent.content, 'aGVsbG8=');
+      assert.equal(sent.sha, undefined);
+      return Response.json({ content: { html_url: 'https://github.com/a/b/blob/main/docs/hi.md' } });
+    },
+  });
+  assert.equal(created.title, 'Created docs/hi.md');
+  assert.equal(created.items[0].url, 'https://github.com/a/b/blob/main/docs/hi.md');
+
+  const updated = await runConnector({ service: 'github', action: 'write-file', repo: 'a/b', path: 'docs/hi.md', content: 'hello' }, creds, {
+    fetchImpl: async (url, options) => {
+      if (!options?.method) return Response.json({ sha: 'abc123' });
+      assert.equal(JSON.parse(options.body).sha, 'abc123');
+      return Response.json({ commit: { html_url: 'https://github.com/a/b/commit/1' } });
+    },
+  });
+  assert.equal(updated.title, 'Updated docs/hi.md');
+});
+
+test('keeps the allow-changes flag with the other settings', () => {
+  const storage = fakeStorage();
+  writeConnectors(storage, { github: { token: 't', allowWrite: true }, supabase: {}, cloudflare: {}, reddit: {} });
+  assert.equal(readConnectors(storage).github.allowWrite, true);
+  writeConnectors(storage, { github: { token: 't', allowWrite: false }, supabase: {}, cloudflare: {}, reddit: {} });
+  assert.equal(readConnectors(storage).github.allowWrite, undefined);
 });
