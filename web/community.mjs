@@ -241,8 +241,35 @@ function orderForQuality(pool) {
   });
 }
 
-export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false }) {
-  if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
+// The free pool gives no real timing, so this is calibrated rather than exact:
+// one queued job per worker usually costs about twenty seconds, and a reply of
+// roughly a thousand tokens takes around a minute to write. It is shown as an
+// estimate, never as a promise.
+const SECONDS_PER_JOB = 20;
+const TOKENS_PER_SECOND = 18;
+
+/** A rough wait for the best model on offer, or undefined when nothing is known. */
+export function waitEstimate(models, { tokens = ANSWER_TOKENS } = {}) {
+  const known = (models ?? []).filter((m) => Number.isFinite(m?.queue) && Number.isFinite(m?.count) && m.count > 0);
+  if (!known.length) return undefined;
+  const jobs = Math.min(...known.map((m) => m.queue / m.count));
+  const seconds = Math.max(5, Math.round(Math.min(jobs, 60) * SECONDS_PER_JOB + Math.min(tokens, 1200) / TOKENS_PER_SECOND));
+  return { seconds, models: known.length };
+}
+
+/** "about 40 seconds" — words a person can act on, never a false precision. */
+export function describeWait({ seconds, models } = {}) {
+  if (!seconds) return '';
+  const when = seconds < 20 ? 'under 20 seconds' : seconds < 70 ? 'about a minute' : `about ${Math.round(seconds / 60)} minutes`;
+  return `${models} ${models === 1 ? 'model' : 'models'} online · ${when}`;
+}
+
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [] } = {}) {
+  const bannedIds = [].concat(banned ?? []);
+  if (bannedIds.length) models = models.filter((m) => !bannedIds.includes(m.id));
+  if (!models.length) throw new CommunityError(bannedIds.length
+    ? 'Every model that can answer here is on your never-use list. Clear it in Settings → Models.'
+    : 'No text models are online in the community pool. Try again later.');
   const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
   let reduced;
   for (let context = messages; ; context = shorterContext(context)) {
@@ -270,7 +297,12 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     const ordered = code
       ? [...ranked].sort((a, b) => (codeFit(b) - codeFit(a)) || 0)
       : ranked;
-    const candidates = ordered.slice(0, MAX_CANDIDATES);
+    // A pinned model leads its pass, but never a triage vote and never a pass
+    // that is meant to be written by a different model than the draft.
+    const pin = purpose !== 'triage' && pinned && !avoid.includes(pinned)
+      ? ordered.find((m) => m.id === pinned) : undefined;
+    const lineup = pin ? [pin, ...ordered.filter((m) => m !== pin)] : ordered;
+    const candidates = lineup.slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
       max_tokens: Math.min(...candidates.map(({ room }) => room)),
@@ -285,7 +317,7 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
 // roster instead of asking the network for the same list each time.
 const ROSTER_TTL = 45_000;
 
-export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLimit = () => {}, fetchImpl = globalThis.fetch } = {}) {
+export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLimit = () => {}, preference = {}, fetchImpl = globalThis.fetch } = {}) {
   let roster;
   let rosterAt = 0;
   return {
@@ -297,7 +329,7 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
           rosterAt = Date.now();
         }
         onModels(roster);
-        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code });
+        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned });
       };
       const complete = async (body) => {
         onPhase('waiting');

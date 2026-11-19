@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { communityEngine, getOnlineModels, planCommunityRequest } from '../web/community.mjs';
+import { communityEngine, describeWait, getOnlineModels, planCommunityRequest, waitEstimate } from '../web/community.mjs';
 import { answerChat } from '../web/chat.mjs';
 
 const api = 'https://oai.aihorde.net/v1';
@@ -271,4 +271,43 @@ test('the page shows the finished reply when a provider closes without [DONE]', 
   assert.equal(answer.model, 'worker/A');
   assert.equal(answer.warning, undefined);
   assert.equal(answer.limited, undefined);
+});
+
+test('a pinned model leads its pass, and a banned one never answers', () => {
+  const models = [
+    { id: 'small/Model-7B', count: 8, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'Llama-3.1-70B-Instruct', count: 2, context: 8192, tokens: 1024, queue: 4 },
+  ];
+  const messages = [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Explain cache invalidation.' }];
+  // Without a preference, capacity decides and the busy 70B is not first.
+  assert.equal(planCommunityRequest(models, { messages, purpose: 'answer', code: false }).models[0], 'small/Model-7B');
+  // A pin puts it in front even when it is the busier model…
+  const pinned = planCommunityRequest(models, { messages, purpose: 'answer', pinned: 'Llama-3.1-70B-Instruct' });
+  assert.equal(pinned.models[0], 'Llama-3.1-70B-Instruct');
+  // …but never decides the one-word triage vote.
+  assert.equal(planCommunityRequest(models, { messages, purpose: 'triage', pinned: 'Llama-3.1-70B-Instruct' }).models[0], 'small/Model-7B');
+  // …and never breaks the rule that the final pass is written by someone else.
+  const avoid = planCommunityRequest(models, { messages, purpose: 'final', preferOtherThan: ['Llama-3.1-70B-Instruct'], pinned: 'Llama-3.1-70B-Instruct' });
+  assert.ok(!avoid.models.includes('Llama-3.1-70B-Instruct'));
+
+  const banned = planCommunityRequest(models, { messages, purpose: 'answer', banned: ['small/Model-7B'] });
+  assert.deepEqual(banned.models, ['Llama-3.1-70B-Instruct']);
+  // Banning everything that is online is said plainly rather than silently answered.
+  assert.throws(() => planCommunityRequest(models, { messages, purpose: 'answer', banned: models.map((m) => m.id) }), /never-use list/);
+});
+
+test('the wait estimate is drawn from the queue and stays a rounded estimate', () => {
+  const models = [
+    { id: 'a', count: 2, queue: 10, context: 8192, tokens: 1024 },
+    { id: 'b', count: 4, queue: 40, context: 8192, tokens: 1024 },
+  ];
+  // The best queue per worker wins: 10/2 = 5 jobs, not 40/4 = 10.
+  const estimate = waitEstimate(models);
+  assert.equal(estimate.models, 2);
+  assert.ok(estimate.seconds > 100 && estimate.seconds < 200, String(estimate.seconds));
+  assert.equal(waitEstimate([]), undefined);
+  assert.equal(waitEstimate([{ id: 'a', count: 1, queue: Infinity }]), undefined);
+  assert.match(describeWait(estimate), /^2 models online · about \d+ minutes?$/);
+  assert.equal(describeWait(waitEstimate([{ id: 'a', count: 1, queue: 0 }], { tokens: 64 })), '1 model online · under 20 seconds');
+  assert.equal(describeWait(undefined), '');
 });

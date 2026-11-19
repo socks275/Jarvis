@@ -61,3 +61,51 @@ test('passes a refusal through in words the page can show', async () => {
   const offline = await handle(call(), env, async () => { throw new TypeError('Failed to fetch'); });
   assert.equal(offline.status, 502);
 });
+
+// --- reading a page -------------------------------------------------------
+
+const readCall = (url, init = {}) => new Request(`https://relay.test/read?url=${encodeURIComponent(url)}`, {
+  method: 'GET',
+  headers: { Origin: 'https://example.com' },
+  ...init,
+});
+const page = (body, type = 'text/html; charset=utf-8') => new Response(body, { headers: { 'Content-Type': type } });
+
+test('reads a linked page and returns its words, not its markup', async () => {
+  const html = '<html><head><title>Example &amp; Co</title><style>p{color:red}</style></head>'
+    + '<body><script>alert(1)</script><h1>Hello</h1><p>First paragraph.</p><p>Second.</p></body></html>';
+  let asked;
+  const response = await handle(readCall('https://example.com/article'), env, async (url) => { asked = url; return page(html); });
+  assert.equal(response.status, 200);
+  assert.equal(asked, 'https://example.com/article');
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), 'https://example.com');
+  const data = await response.json();
+  assert.equal(data.title, 'Example & Co');
+  assert.match(data.text, /Hello/);
+  assert.match(data.text, /First paragraph\./);
+  assert.doesNotMatch(data.text, /alert|color:red|<p>/);
+});
+
+test('the reader refuses private hosts, odd schemes and non-pages', async () => {
+  const never = async () => { throw new Error('must not be called'); };
+  for (const url of ['http://localhost:8080/admin', 'http://192.168.0.1/', 'http://10.0.0.5/', 'file:///etc/passwd', 'ftp://example.com/x', 'http://metadata.internal/']) {
+    const response = await handle(readCall(url), env, never);
+    assert.equal(response.status, 400, url);
+    assert.equal((await response.json()).error, 'invalid_url');
+  }
+  const pdf = await handle(readCall('https://example.com/a.pdf'), env, async () => page('%PDF', 'application/pdf'));
+  assert.equal(pdf.status, 415);
+  const broken = await handle(readCall('https://example.com/x'), env, async () => page('nope', 'text/html'), );
+  assert.equal(broken.status, 200);
+  const down = await handle(readCall('https://example.com/x'), env, async () => new Response('gone', { status: 404 }));
+  assert.equal(down.status, 502);
+});
+
+test('the reader stays origin-locked and only answers GET', async () => {
+  const wrong = await handle(new Request('https://relay.test/read?url=https%3A%2F%2Fexample.com', { headers: { Origin: 'https://evil.test' } }), env, async () => page('<p>x</p>'));
+  assert.equal(wrong.status, 403);
+  const post = await handle(readCall('https://example.com', { method: 'POST' }), env, async () => page('<p>x</p>'));
+  assert.equal(post.status, 405);
+  const preflight = await handle(readCall('https://example.com', { method: 'OPTIONS' }), env, async () => { throw new Error('must not be called'); });
+  assert.equal(preflight.status, 204);
+});

@@ -15,7 +15,23 @@ Open `http://localhost:3000`, type a message, and press **Enter** or the send ar
 
 **Community AI** is the default. It uses the [AI Horde public chat interface](https://oai.aihorde.net/docs) without a model download, account, personal API key, or payment. Chorus checks which text models are online before asking for a reply; **Settings → Check availability** checks the list without sending a message. Availability, output limits, and wait times vary, and anonymous traffic has low priority. Chorus streams provider output when it’s available and shows wait information when the service supplies it.
 
-Chorus answers with a small team of models, and one model decides the size of that team. It reads your message first and replies with one word: one model for small talk such as a greeting or a quick thanks, two for a question or a request, three for coding, maths or anything risky. The models then work in order: one drafts, the next replies with corrections, and the last gives the finished answer — and that last pass prefers a **larger model from the roster (30B and up) whenever one is reachable**, falling back to queue order when the big models are buried. One reply looks up the model roster once and shares it across its passes, instead of asking the network for the same list three times. Each reply names the model that decided and the models that answered, so you can see who drafted, who checked and who finished. If the deciding model can’t be reached, a built-in guess keeps the reply moving. Turn on **Think deeper** to skip the vote and use the full three-model team even for a short question. That takes longer because the models work in sequence. If a later model cannot finish, Chorus shows the draft with a note. A reply that runs out of room is not left half-finished: Chorus asks the same model to carry on, pass after pass, until it stops of its own accord. Use **Stop** to cancel a reply or **Try again** to request a new answer to the most recent message. Chorus respects provider cooldowns and does not automatically resubmit an uncertain request.
+Chorus answers with a small team of models, and one model decides the size of that team. It reads your message first and replies with one word: one model for small talk such as a greeting or a quick thanks, two for a question or a request, three for coding, maths or anything risky. Once the model roster is known — after **Check availability** or the first reply — a small line under the composer estimates the wait in plain words ("12 models online · about a minute"), drawn from each model's queue and worker count. The models then work in order: one drafts, the next replies with corrections, and the last gives the finished answer — and that last pass prefers a **larger model from the roster (30B and up) whenever one is reachable**, falling back to queue order when the big models are buried. One reply looks up the model roster once and shares it across its passes, instead of asking the network for the same list three times. Each reply names the model that decided and the models that answered, so you can see who drafted, who checked and who finished. If the deciding model can’t be reached, a built-in guess keeps the reply moving. Turn on **Think deeper** to skip the vote and use the full three-model team even for a short question. That takes longer because the models work in sequence. If a later model cannot finish, Chorus shows the draft with a note. A reply that runs out of room is not left half-finished: Chorus asks the same model to carry on, pass after pass, until it stops of its own accord. Use **Stop** to cancel a reply or **Try again** to request a new answer to the most recent message. Chorus respects provider cooldowns and does not automatically resubmit an uncertain request.
+
+## Steering the models
+
+Chorus picks the team itself — a model reads each message and decides whether one, two or three should answer. Three settings let you overrule it without taking the wheel:
+
+- **Pin a model.** Under any reply, press **Pin model**. From then on that model leads every pass in this browser (the one-word team-size vote excepted, and never for the pass that has to be written by someone other than the draft). Press it again to unpin, or clear it in **Settings → Models**.
+- **Never use a model.** **Never use** on the same row keeps that model out of the pool entirely. If every online model is blocked, Chorus says so plainly instead of answering anyway.
+- **Your own instructions.** **Settings → How should Chorus answer?** takes up to 600 characters — language, length, tone, format, house style — sent with every reply in this browser. It is stacked on top of the built-in rules, so it can change the style but cannot remove the accuracy and honesty ones. Each reply stores the instructions it was written under, so changing the box never rewrites an old answer.
+
+**About this chat**, in **Chat options**, is the per-chat version: 300 characters the models see in this conversation only, useful for “we are migrating a Django app to FastAPI” or “answer for a five-year-old”.
+
+## Reading what you link
+
+Put a URL in a message and Chorus fetches the page, strips it to text, and gives it to the models before they answer — so “summarise this” is about the page rather than about its title. Up to three links per message.
+
+A browser cannot read another site's HTML directly, so this goes through the relay in [`relay/`](relay/), the same one GitHub sign-in uses: paste its address in **Settings → Reading pages**. The relay only reads `http` and `https` pages on public hosts — `localhost`, private address ranges, `file:` and other schemes are refused — with a 12-second timeout and a size cap. Pages are read only when you link one, never in the background, and the text is kept in this browser.
 
 ## Coding
 
@@ -61,6 +77,26 @@ Three details worth knowing:
 - **It changes the prompt, not the model.** Chorus cannot un-train a model; it can only ask differently. When a model still declines, the mode gets **one extra retry**, phrased with no room left for an apology and pointed at a different model. If every model declines even then, the reply says so plainly — *that is those models' limit rather than how the request was worded* — and suggests **Try again** for a different set or On-device with a model you pick. It never invents an answer to cover for a refusal.
 - **It is per reply, and off by default.** The switch is saved in this browser, the replies you start while it is on are labelled **Uncensored**, and turning it off does not rewrite a reply you already have. **Try again** uses the mode as it is set *now*, which is the quickest way to give a refused answer a second chance.
 - **Only the instructions change.** Your messages go to the same models, your chats stay in the same place, and everything under **Privacy and history** is unchanged.
+
+## Working with a chat
+
+- **Edit a question.** **Edit** under any of your messages puts it back in the composer; sending replaces that turn and everything after it, so a bad question costs a click rather than a retype.
+- **Export it.** In **Chat options**: **Download .md** (readable, with the model named under each reply), **Download .json** (the whole chat, for processing), or **Copy as Markdown**.
+- **Pin a chat.** Pinned chats stay at the top of the sidebar and survive trimming, so the ones you return to are always where you left them.
+- **Drafts survive a reload.** A half-written message is kept in this browser per chat, including the new-chat box.
+- **Character budget.** Past 3,000 characters a counter appears under the composer, so the 4,000-character limit never arrives as a surprise.
+
+## Keyboard shortcuts
+
+`Ctrl/⌘ + K` search · `Ctrl/⌘ + ⇧ + O` new chat · `Ctrl/⌘ + ,` settings · `Ctrl/⌘ + ⇧ + C` copy the last reply · `Ctrl/⌘ + ⇧ + R` try the last reply again · `Ctrl/⌘ + /` the full list. The same list is in the page footer.
+
+## When something goes wrong
+
+**Settings → Activity** shows what actually happened on the last replies: every model tried, what the queue said, retries, and the provider's own error text. It lives in memory only, is never sent anywhere, and can be copied in one press — which turns “it felt slow” into something specific.
+
+## Offline and install
+
+The whole app is a few modules and two fonts, so Chorus registers a service worker that caches them after the first visit. Reload without a connection and it still opens and renders; only sending needs the network. It is also installable — **Install app** in Chrome or Edge, **Add to Home Screen** on a phone — with a manifest and theme colour. App files are fetched first and fall back to the cache, so a deploy is picked up on the next load instead of being pinned to a stale copy.
 
 ## Canvas and video
 
@@ -144,7 +180,7 @@ export default {
 2. Deploy the worker with `ALLOWED_ORIGIN`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` set as secrets.
 3. In Settings → Connectors → GitHub, paste the client ID and the worker URL, then press **Sign in with GitHub**.
 
-Chorus checks the account afterwards and shows “Connected as @you”. The relay is optional: the token field keeps working on its own. `*.workers.dev`, `*.pages.dev`, `*.deno.dev`, `*.vercel.app` and `*.netlify.app` are already allowed in the page's `connect-src`; a relay on another host needs that host added there.
+The same worker also answers `GET /read?url=…` for **Reading pages**: it fetches a public page, strips it to text and returns it, origin-locked like the token exchange. Chorus checks the account afterwards and shows “Connected as @you”. The relay is optional: the token field keeps working on its own. `*.workers.dev`, `*.pages.dev`, `*.deno.dev`, `*.vercel.app` and `*.netlify.app` are already allowed in the page's `connect-src`; a relay on another host needs that host added there.
 
 Reddit, Cloudflare and Supabase have no browser-safe OAuth: Reddit's token endpoint refuses cross-origin calls, Cloudflare's OAuth needs a client secret and is not offered for public clients, and a Supabase project is authenticated by its URL and key rather than by signing in.
 
@@ -160,6 +196,8 @@ For work that shouldn’t leave your computer, choose **Settings → On-device**
 
 - [Qwen2.5 0.5B Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true) — 491 MB.
 - [SmolLM2 360M Instruct](https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf) — 271 MB, a smaller option.
+
+Chorus reads the context window from the file's own GGUF metadata and asks for it, capped by what the machine can hold (about 4k on a small laptop, up to 16k with 8 GB or more) — a model trained on 32k is no longer used at a flat 4k. **Settings** shows which window you got and why. The model also stays loaded between replies, so a follow-up does not pay the loading cost again; stopping a reply unloads it, because a warm model cannot be interrupted.
 
 Local models run with [wllama](https://github.com/ngxson/wllama) and WebAssembly on your CPU. Larger models may be slow or exceed browser memory. If the embedded preview limits workers, open the preview in its own tab.
 

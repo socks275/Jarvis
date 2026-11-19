@@ -1,8 +1,9 @@
 import MarkdownIt from './vendor/markdown-it.mjs';
 import { createFormatter } from './format.mjs';
-import { answerChat, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, readChats, saveChats } from './chat.mjs';
-import { communityEngine, getOnlineModels } from './community.mjs';
-import { browserEngine, validateModel } from './engine.mjs';
+import { answerChat, chatToJson, chatToMarkdown, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, PROMPT_LIMIT, readChats, rewindTo, saveChats } from './chat.mjs';
+import { communityEngine, describeWait, getOnlineModels, waitEstimate } from './community.mjs';
+import { browserEngine, contextWindow, disposeLocal, validateModel } from './engine.mjs';
+import { fetchPage, findUrls, sourceContext } from './read.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
 import { buildGame, gameTweak, isGameRequest, mergeGameOptions, pickTheme, themeName } from './game.mjs';
 import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, testConnector, writeConnectors } from './connectors.mjs';
@@ -27,20 +28,59 @@ let storage;
 try { storage = window.localStorage; } catch { /* some embedded contexts deny storage */ }
 // Preferences are per browser, like the connectors: no account, no sync.
 const PREFS_KEY = 'chorus-web:prefs:v1';
+const DRAFTS_KEY = 'chorus-web:drafts:v1';
+const PERSONA_LIMIT = 600;
+const READ_PAGE_LIMIT = 3;
+
 function readPrefs() {
+  const blank = { direct: false, persona: '', pinned: '', banned: [], readRelay: '' };
   try {
-    const saved = JSON.parse(storage?.getItem(PREFS_KEY) ?? '{}');
-    return { direct: saved?.direct === true };
-  } catch { return { direct: false }; }
+    const saved = JSON.parse(storage?.getItem(PREFS_KEY) ?? '{}') ?? {};
+    return {
+      direct: saved.direct === true,
+      persona: typeof saved.persona === 'string' ? saved.persona.slice(0, PERSONA_LIMIT) : '',
+      pinned: typeof saved.pinned === 'string' ? saved.pinned.slice(0, 300) : '',
+      banned: Array.isArray(saved.banned) ? saved.banned.filter((id) => typeof id === 'string' && id).slice(0, 50) : [],
+      readRelay: typeof saved.readRelay === 'string' ? saved.readRelay.slice(0, 500).trim() : '',
+    };
+  } catch { return blank; }
 }
+
 function writePrefs() {
-  try { storage?.setItem(PREFS_KEY, JSON.stringify({ direct })); } catch { /* storage disabled */ }
+  try { storage?.setItem(PREFS_KEY, JSON.stringify({ direct, persona, pinned, banned, readRelay })); } catch { /* storage disabled */ }
+}
+
+// A half-written message survives a reload, like it would in any other editor.
+function readDrafts() {
+  try {
+    const saved = JSON.parse(storage?.getItem(DRAFTS_KEY) ?? '{}');
+    const map = new Map();
+    if (saved && typeof saved === 'object') {
+      for (const [key, value] of Object.entries(saved)) {
+        if (typeof value === 'string' && value && value.length <= PROMPT_LIMIT) map.set(key.slice(0, 60), value);
+      }
+    }
+    return map;
+  } catch { return new Map(); }
+}
+
+function writeDrafts() {
+  try {
+    const saved = {};
+    for (const [key, value] of drafts) {
+      if (!value) continue;
+      saved[key] = value;
+      if (Object.keys(saved).length >= 30) break;
+    }
+    if (Object.keys(saved).length) storage?.setItem(DRAFTS_KEY, JSON.stringify(saved));
+    else storage?.removeItem(DRAFTS_KEY);
+  } catch { /* storage disabled */ }
 }
 let connectors = readConnectors(storage);
 let connectorRun = false;
 let chats = readChats(storage);
 let current;
-const drafts = new Map();
+const drafts = readDrafts();
 let active;
 let retryLater;
 let pendingNodes;
@@ -50,7 +90,22 @@ let localFile;
 let validatingFile = false;
 let deeper = false;
 // Uncensored mode: off unless it was switched on in this browser.
-let direct = readPrefs().direct;
+const saved = readPrefs();
+let direct = saved.direct;
+let persona = saved.persona;
+let pinned = saved.pinned;
+let banned = saved.banned;
+let readRelay = saved.readRelay;
+// The window the chosen file was trained for, read from its metadata.
+let localContext;
+let eta;
+// What actually happened, newest last, so a bad reply can be explained.
+const activity = [];
+const ACTIVITY_LIMIT = 300;
+function note(kind, text) {
+  activity.push({ at: Date.now(), kind, text: String(text ?? '').slice(0, 500) });
+  if (activity.length > ACTIVITY_LIMIT) activity.splice(0, activity.length - ACTIVITY_LIMIT);
+}
 let communityAllowed = false;
 let consentAction;
 let statusController;
@@ -111,6 +166,12 @@ function save() {
 function sizePrompt() {
   prompt.style.height = 'auto';
   prompt.style.height = `${prompt.scrollHeight}px`;
+  const length = prompt.value.length;
+  $('char-count').hidden = length < 3000;
+  $('char-count').textContent = `${length.toLocaleString('en-US')} / ${PROMPT_LIMIT.toLocaleString('en-US')}`;
+  delete $('char-count').dataset.tone;
+  if (length >= PROMPT_LIMIT) $('char-count').dataset.tone = 'limit';
+  else if (length >= PROMPT_LIMIT - 400) $('char-count').dataset.tone = 'near';
 }
 
 function setSidebar(open, focus = false) {
@@ -135,8 +196,13 @@ function paintSidebar() {
 function historyButton(chat, search = false) {
   const node = el('button', 'history-button');
   node.type = 'button';
-  node.title = chat.title;
+  node.title = chat.pinned ? `${chat.title} (pinned)` : chat.title;
   node.append(icon('chat'), el('span', 'history-title', chat.title));
+  if (chat.pinned) {
+    const pin = el('span', 'history-pinned', 'Pinned');
+    pin.setAttribute('aria-label', 'Pinned chat');
+    node.append(pin);
+  }
   if (current === chat) node.setAttribute('aria-current', 'true');
   if (active?.chat === chat) {
     const mark = el('span', 'history-running');
@@ -203,6 +269,10 @@ function paintComposer() {
   $('deep-button').hidden = engine === 'local';
   $('deep-button').disabled = Boolean(active);
   $('deep-button').setAttribute('aria-pressed', String(deeper));
+  const wait = engine === 'community' && !active && !cooldown ? describeWait(eta) : '';
+  $('eta-note').textContent = wait;
+  $('eta-note').hidden = !wait;
+  $('edit-banner').hidden = !editTarget;
   $('direct-chip').hidden = !direct;
   $('direct-chip').setAttribute('aria-pressed', String(direct));
   $('composer-status').hidden = !(busyElsewhere || cooldown || needsFile);
@@ -222,6 +292,25 @@ function showCooldown(seconds) {
   paintSettings();
 }
 
+function activityText() {
+  if (!activity.length) return 'No activity yet.';
+  return activity.map((entry) => {
+    const when = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `${when}  ${entry.kind.padEnd(8)} ${entry.text}`;
+  }).join('\n');
+}
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = el('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+const exportName = (chat, extension) => `${(chat.title || 'chorus chat').replace(/[^\w\- ]+/g, '').trim().slice(0, 50) || 'chorus-chat'}.${extension}`;
+
 function paintSettings() {
   const locked = Boolean(active || validatingFile);
   for (const option of engineOptions) {
@@ -232,6 +321,17 @@ function paintSettings() {
   $('direct-toggle').setAttribute('aria-checked', String(direct));
   $('direct-toggle').disabled = locked;
   $('direct-toggle').title = direct ? 'Turn uncensored mode off' : 'Turn uncensored mode on';
+  if ($('persona-input').value !== persona) $('persona-input').value = persona;
+  $('persona-input').disabled = locked;
+  $('pinned-name').textContent = pinned || 'automatic';
+  $('banned-names').textContent = banned.length ? banned.join(', ') : 'nothing';
+  $('clear-model-picks').disabled = locked || (!pinned && !banned.length);
+  if ($('read-relay').value !== readRelay) $('read-relay').value = readRelay;
+  $('read-relay').disabled = locked;
+  $('read-relay-note').textContent = readRelay || connectors.github?.relay
+    ? 'Pages are read only when you link them, and only through this relay.'
+    : 'Deploy the relay once and paste its address here — the GitHub sign-in relay works too. Pages are read only when you link them.';
+  $('activity-log').textContent = activityText();
   $('community-settings').hidden = engine !== 'community';
   $('local-settings').hidden = engine !== 'local';
   $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
@@ -245,6 +345,11 @@ function paintSettings() {
   $('reset-permission').disabled = Boolean(active);
   $('model-file').disabled = locked;
   $('file-label').textContent = validatingFile ? 'Checking model file…' : localFile?.name ?? 'Choose a .gguf file';
+  const window_ = localFile ? contextWindow(localContext) : 0;
+  $('model-window').hidden = !localFile;
+  $('model-window').textContent = localFile
+    ? `Window: ${window_.toLocaleString('en-US')} tokens${localContext && localContext !== window_ ? ` (the file offers ${localContext.toLocaleString('en-US')}, capped for this device)` : ''}. The model stays loaded between replies.`
+    : '';
   $('clear-model').hidden = !localFile;
   $('clear-model').disabled = locked;
   $('clear-chats').disabled = Boolean(active || !chats.length);
@@ -497,7 +602,7 @@ function phaseText(job) {
   }
 }
 
-async function copy(text, control) {
+async function copy(text, control, done = 'Copied to clipboard') {
   try { await navigator.clipboard.writeText(text); }
   catch {
     const temporary = el('textarea', 'sr-only');
@@ -511,7 +616,7 @@ async function copy(text, control) {
     control?.focus({ preventScroll: true });
     if (!done) { toast('Clipboard unavailable. Select and copy the text instead.'); return; }
   }
-  toast('Copied to clipboard');
+  toast(done);
 }
 
 function videoCard(video, { pending = false, onRetry } = {}) {
@@ -708,7 +813,18 @@ function messageNode(message, last) {
   const row = el('article', `message message-${user ? 'user' : 'assistant'}`);
   row.setAttribute('aria-label', user ? 'Your message' : 'Chorus’s reply');
   row.dataset.status = message.status ?? 'sent';
-  if (user) { row.append(el('p', 'user-bubble', message.text)); return row; }
+  if (user) {
+    row.append(el('p', 'user-bubble', message.text));
+    const index = current?.messages.indexOf(message) ?? -1;
+    if (index >= 0 && !active) {
+      const actions = el('div', 'message-actions');
+      const edit = button('message-action', 'Edit', 'pen', () => startEdit(index));
+      edit.setAttribute('aria-label', 'Edit this message and ask again');
+      actions.append(edit);
+      row.append(actions);
+    }
+    return row;
+  }
   const avatar = el('span', 'assistant-icon');
   avatar.append(icon('logo'));
   const content = el('div', 'assistant-content');
@@ -771,6 +887,29 @@ function messageNode(message, last) {
     const source = el('span', 'message-meta', message.model);
     source.title = `${message.engine === 'community' ? 'Community model' : 'Local model'}: ${message.model}`;
     actions.append(source);
+    // Steering the team without a settings screen: this reply's model can be
+    // made the first choice, or kept out of the pool entirely.
+    if (message.engine === 'community') {
+      const pin = button('message-action', pinned === message.model ? 'Unpin' : 'Pin model', '', () => {
+        pinned = pinned === message.model ? '' : message.model;
+        banned = banned.filter((id) => id !== pinned);
+        writePrefs();
+        paintSettings();
+        paintThread();
+        toast(pinned ? `${message.model} will lead the team` : 'Model preference cleared');
+      });
+      pin.setAttribute('aria-label', pinned === message.model ? `Stop preferring ${message.model}` : `Prefer ${message.model} from now on`);
+      const avoid = button('message-action', 'Never use', '', () => {
+        banned = banned.includes(message.model) ? banned.filter((id) => id !== message.model) : [...banned, message.model].slice(0, 50);
+        if (pinned === message.model) pinned = '';
+        writePrefs();
+        paintSettings();
+        paintThread();
+        toast(`${message.model} ${banned.includes(message.model) ? 'kept out of the team' : 'allowed again'}`);
+      });
+      avoid.setAttribute('aria-label', `Never use ${message.model} in this browser`);
+      actions.append(pin, avoid);
+    }
   }
   if (actions.childNodes.length) content.append(actions);
   return row;
@@ -832,10 +971,12 @@ function urlForChat(chat) {
 }
 
 function openChat(chat, { fromUrl = false, focus = true } = {}) {
+  if (editTarget && editTarget.chat !== chat) editTarget = undefined;
   if (current !== chat) {
     const key = current?.id ?? '';
     if (prompt.value) drafts.set(key, prompt.value);
     else drafts.delete(key);
+    writeDrafts();
     current = chat;
     prompt.value = drafts.get(current?.id ?? '') ?? '';
   }
@@ -861,6 +1002,51 @@ function startNewChat() {
   drafts.delete('');
   if (!current) prompt.value = '';
   openChat(undefined);
+}
+
+let editTarget;
+
+/** Puts an earlier question back in the composer, ready to be changed and sent again. */
+function startEdit(index) {
+  if (!current || active) return;
+  const message = current.messages[index];
+  if (!message || message.role !== 'user') return;
+  editTarget = { chat: current, index };
+  prompt.value = message.text;
+  sizePrompt();
+  paintComposer();
+  prompt.focus({ preventScroll: true });
+  toast(`Editing question ${index / 2 + 1} — change it and send`);
+}
+
+function cancelEdit() {
+  editTarget = undefined;
+  prompt.value = drafts.get(current?.id ?? '') ?? '';
+  sizePrompt();
+  paintComposer();
+  paintThread();
+}
+
+/** Reads the pages a message links to, so the answer can quote them. */
+async function readLinkedPages(chat) {
+  if (!readRelay) return;
+  const question = chat.messages.at(-2);
+  if (!question || question.role !== 'user' || question.context) return;
+  const urls = findUrls(question.text, { limit: READ_PAGE_LIMIT });
+  if (!urls.length) return;
+  const signal = active?.controller.signal;
+  const pages = [], failed = [];
+  await Promise.all(urls.map(async (url) => {
+    try { pages.push(await fetchPage({ relay: readRelay, url, signal })); }
+    catch (error) { failed.push(error instanceof Error ? error.message : String(error)); }
+  }));
+  const context = sourceContext(pages);
+  if (context) {
+    question.context = context.slice(0, 8000);
+    note('read', `${pages.length} page${pages.length === 1 ? '' : 's'}: ${pages.map((page) => page.url).join(', ')}`);
+  }
+  for (const message of failed) note('read', message);
+  if (!context && failed.length) toast(failed[0]);
 }
 
 function tryReply(action) {
@@ -898,6 +1084,14 @@ function tryReply(action) {
   }
   let reply;
   const deep = engine === 'community' && deeper;
+  if (!retry && editTarget && editTarget.chat === current) {
+    // Editing replaces the turn and everything after it: the reply that followed
+    // answered the old question, so it cannot stay.
+    rewindTo(current, editTarget.index);
+    note('edit', `question #${editTarget.index / 2 + 1} asked again`);
+    editTarget = undefined;
+    paintComposer();
+  }
   if (retry) {
     reply = current.messages.at(-1);
     // Asking again honours the mode as it is set now: turning uncensored on and
@@ -905,6 +1099,7 @@ function tryReply(action) {
     Object.assign(reply, {
       deep, status: 'pending', text: '', model: undefined, warning: undefined, limited: undefined, team: undefined,
       raw: direct || undefined,
+      persona: persona || undefined,
     });
   } else {
     drafts.delete(current?.id ?? '');
@@ -915,7 +1110,10 @@ function tryReply(action) {
       urlForChat(current);
     }
     reply = newTurn(current, text, engine, deep, direct);
+    if (persona) reply.persona = persona;
     prompt.value = '';
+    sizePrompt();
+    writeDrafts();
   }
   generate(current, reply);
 }
@@ -938,6 +1136,7 @@ async function runConnectorTurn(text, request) {
     urlForChat(current);
   }
   const reply = newTurn(current, text, engine, engine === 'community' && deeper, direct);
+  if (persona) reply.persona = persona;
   const question = current.messages.at(-2);
   prompt.value = '';
   sizePrompt();
@@ -1054,14 +1253,26 @@ async function generate(chat, message) {
   retryLater = undefined;
   statusController?.abort();
   const controller = new AbortController();
-  const job = { chat, message, controller, steps: [] };
+  const job = { chat, message, controller, steps: [], finalising: false, draft: '' };
   active = job;
-  const onPhase = (phase, queue) => { job.phase = phase; job.queue = queue; refreshStream(job); };
-  const runtime = message.engine === 'community' ? communityEngine({ onPhase, onLimit: showCooldown, onModels(list) {
-    models = list;
-    networkError = '';
-    if ($('settings-dialog').open) paintSettings();
-  } }) : browserEngine(localFile, onPhase);
+  const onPhase = (phase, queue) => {
+    job.phase = phase;
+    job.queue = queue;
+    if (phase === 'waiting' && queue?.seconds) note('queue', `${queue.position ? `position ${queue.position}, ` : ''}${queue.seconds}s wait`);
+    refreshStream(job);
+  };
+  const runtime = message.engine === 'community' ? communityEngine({
+    onPhase,
+    onLimit: showCooldown,
+    preference: { pinned, banned },
+    onModels(list) {
+      models = list;
+      eta = waitEstimate(list);
+      networkError = '';
+      note('roster', `${list.length} models online${pinned ? `, preferring ${pinned}` : ''}${banned.length ? `, avoiding ${banned.length}` : ''}`);
+      if ($('settings-dialog').open) paintSettings();
+    },
+  }) : browserEngine(localFile, onPhase, { context: contextWindow(localContext) });
   chat.updatedAt = Date.now();
   save();
   paintView(true);
@@ -1069,15 +1280,30 @@ async function generate(chat, message) {
   paintSettings();
   if (!mobile.matches) prompt.focus({ preventScroll: true });
   $('announcer').textContent = 'Chorus is preparing a reply.';
+  note('ask', `${message.engine === 'community' ? 'community' : 'on-device'}${message.raw ? ' · uncensored' : ''}${persona ? ' · with your instructions' : ''}`);
   try {
+    // A link in the message is read before the models are asked, so the answer
+    // can be about what the page actually says.
+    await readLinkedPages(chat);
+    if (controller.signal.aborted) throw controller.signal.reason;
     // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
       signal: controller.signal, deep: message.deep, direct: message.raw === true, mode: message.engine === 'local' ? 'solo' : undefined,
       decide: message.engine === 'community',
-      onText(text) { message.text = text; refreshStream(job); },
+      onText(text) {
+        // The draft stays on screen while the final pass writes, so the answer
+        // never collapses to an empty bubble and then grows back.
+        if (!job.finalising) job.draft = text;
+        message.text = job.finalising && job.draft && text.length < 160 && text.length < job.draft.length ? job.draft : text;
+        refreshStream(job);
+      },
       onStep(step) {
         job.step = step;
-        if (step.state === 'done') job.steps.push(step);
+        if (step.state === 'active' && step.role === 'final') job.finalising = true;
+        if (step.state === 'done') {
+          job.steps.push(step);
+          if (step.model) note(step.role ?? 'step', step.model);
+        }
         if (step.state === 'done' && step.role === 'draft' && job.steps.length === 1) {
           $('announcer').textContent = 'Another model is checking the draft.';
         }
@@ -1085,8 +1311,10 @@ async function generate(chat, message) {
       } });
     controller.signal.throwIfAborted();
     Object.assign(message, answer, { status: 'complete', warning: answer.warning?.slice(0, 600) });
+    note('done', `${answer.model ?? 'unknown model'} · ${message.text.length} characters${answer.warning ? ' · with a warning' : ''}`);
     $('announcer').textContent = 'Reply ready.';
   } catch (error) {
+    if (!controller.signal.aborted) note('error', error instanceof Error ? error.message : String(error));
     if (controller.signal.aborted) {
       message.status = 'stopped';
       message.text = message.text.trim();
@@ -1109,7 +1337,6 @@ async function generate(chat, message) {
       $('announcer').textContent = message.retried ? 'The reply failed; trying once more.' : 'Could not complete the reply.';
     }
   } finally {
-    runtime.dispose?.();
     if (streamFrame) cancelAnimationFrame(streamFrame);
     streamFrame = 0;
     const hadFocus = document.activeElement === $('stop-button');
@@ -1166,12 +1393,55 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape' && mobileSidebar && !document.querySelector('dialog[open]')) setSidebar(false, true);
-  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !document.querySelector('dialog[open]')) {
+  const command = event.ctrlKey || event.metaKey;
+  const open = document.querySelector('dialog[open]');
+  if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !open) {
     event.preventDefault();
     openSearch();
+    return;
+  }
+  if (!command || event.altKey) return;
+  const key = event.key.toLowerCase();
+  // A shortcut that types a letter would fight the composer, so it needs Shift.
+  if (event.shiftKey && key === 'o' && !open) {
+    event.preventDefault();
+    startNewChat();
+    return;
+  }
+  if (event.shiftKey && key === 'c' && !open) {
+    const reply = [...(current?.messages ?? [])].reverse().find((message) => message.role === 'assistant' && message.text);
+    if (!reply) return;
+    event.preventDefault();
+    void copy(reply.text, undefined, 'Reply copied');
+    return;
+  }
+  if (event.shiftKey && key === 'r' && !open) {
+    if (!current || blocked() || current.messages.at(-1)?.role !== 'assistant') return;
+    event.preventDefault();
+    tryReply('retry');
+    return;
+  }
+  if (!event.shiftKey && event.key === ',') {
+    event.preventDefault();
+    paintSettings();
+    $('settings-dialog').showModal();
+    return;
+  }
+  if (!event.shiftKey && event.key === '/') {
+    event.preventDefault();
+    $('shortcuts-dialog').showModal();
   }
 });
-if (/Mac|iPhone|iPad/.test(navigator.platform)) $('search-shortcut').textContent = '⌘ K';
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+  const replace = (id, text) => { $(id).textContent = text; };
+  replace('search-shortcut', '⌘ K');
+  replace('shortcut-search', '⌘ K');
+  replace('shortcut-new', '⌘ ⇧ O');
+  replace('shortcut-settings', '⌘ ,');
+  replace('shortcut-copy', '⌘ ⇧ C');
+  replace('shortcut-again', '⌘ ⇧ R');
+  replace('shortcut-help', '⌘ /');
+}
 
 for (const control of document.querySelectorAll('[data-settings]')) control.addEventListener('click', () => {
   paintSettings();
@@ -1179,6 +1449,33 @@ for (const control of document.querySelectorAll('[data-settings]')) control.addE
 });
 for (const control of document.querySelectorAll('[data-close]')) control.addEventListener('click', () => control.closest('dialog').close());
 $('open-privacy').addEventListener('click', () => $('privacy-dialog').showModal());
+$('open-shortcuts').addEventListener('click', () => $('shortcuts-dialog').showModal());
+$('cancel-edit').addEventListener('click', cancelEdit);
+
+let personaTimer;
+$('persona-input').addEventListener('input', () => {
+  persona = $('persona-input').value.slice(0, 600);
+  clearTimeout(personaTimer);
+  personaTimer = setTimeout(() => { writePrefs(); toast(persona ? 'Your instructions are saved' : 'Back to the default style'); }, 600);
+});
+$('clear-model-picks').addEventListener('click', () => {
+  if (active || validatingFile) return;
+  pinned = '';
+  banned = [];
+  writePrefs();
+  paintSettings();
+  paintThread();
+  toast('Model lists cleared');
+});
+$('read-relay').addEventListener('change', () => {
+  const value = $('read-relay').value.trim();
+  readRelay = /^https:\/\/[^/]+/i.test(value) ? value.replace(/\/+$/, '') : '';
+  if (value && !readRelay) toast('The relay address should start with https://');
+  else { writePrefs(); toast(readRelay ? 'Links in a message will be read' : 'Page reading is off'); }
+  paintSettings();
+});
+$('copy-activity').addEventListener('click', () => copy(activityText(), $('copy-activity'), 'Activity copied'));
+$('clear-activity').addEventListener('click', () => { activity.length = 0; paintSettings(); toast('Activity cleared'); });
 for (const control of document.querySelectorAll('[data-prompt]')) control.addEventListener('click', () => {
   prompt.value = templates[control.dataset.prompt];
   sizePrompt();
@@ -1232,6 +1529,16 @@ $('canvas-source').addEventListener('input', () => {
   canvasTimer = setTimeout(renderCanvasPreview, 350);
 });
 prompt.addEventListener('input', () => { sizePrompt(); paintComposer(); });
+let draftTimer;
+prompt.addEventListener('input', () => {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    const key = current?.id ?? '';
+    if (prompt.value) drafts.set(key, prompt.value);
+    else drafts.delete(key);
+    writeDrafts();
+  }, 500);
+});
 prompt.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
@@ -1384,7 +1691,11 @@ $('model-file').addEventListener('change', async (event) => {
   paintComposer();
   $('model-error').hidden = true;
   paintSettings();
-  try { await validateModel(file); localFile = file; }
+  try {
+    const checked = await validateModel(file);
+    localFile = file;
+    localContext = checked?.context;
+  }
   catch (error) {
     $('model-error').textContent = error.message;
     $('model-error').hidden = false;
@@ -1394,7 +1705,9 @@ $('model-file').addEventListener('change', async (event) => {
   }
 });
 $('clear-model').addEventListener('click', () => {
+  disposeLocal();
   localFile = undefined;
+  localContext = undefined;
   $('model-error').hidden = true;
   paintConnection();
   $('model-file').focus();
@@ -1403,13 +1716,48 @@ $('clear-model').addEventListener('click', () => {
 $('chat-options').addEventListener('click', () => {
   if (!current || active?.chat === current) return;
   $('rename-input').value = current.title;
+  $('note-input').value = current.note ?? '';
+  paintPin();
   $('options-dialog').showModal();
   $('rename-input').select();
+});
+
+function paintPin() {
+  const on = current?.pinned === true;
+  $('pin-chat').setAttribute('aria-pressed', String(on));
+  $('pin-chat').textContent = on ? 'Unpin chat' : 'Pin chat';
+}
+
+$('pin-chat').addEventListener('click', () => {
+  if (!current) return;
+  current.pinned = !current.pinned;
+  if (!current.pinned) delete current.pinned;
+  save();
+  paintHistory();
+  paintPin();
+  toast(current.pinned ? 'Chat pinned to the top' : 'Chat unpinned');
+});
+
+$('export-md').addEventListener('click', () => {
+  if (!current) return;
+  download(exportName(current, 'md'), chatToMarkdown(current), 'text/markdown;charset=utf-8');
+  toast('Chat downloaded as Markdown');
+});
+$('export-json').addEventListener('click', () => {
+  if (!current) return;
+  download(exportName(current, 'json'), chatToJson(current), 'application/json');
+  toast('Chat downloaded as JSON');
+});
+$('copy-md').addEventListener('click', () => {
+  if (current) void copy(chatToMarkdown(current), $('copy-md'), 'Chat copied as Markdown');
 });
 $('save-title').addEventListener('click', () => {
   const title = $('rename-input').value.trim();
   if (!current || !title) { $('rename-input').focus(); return; }
   current.title = title;
+  const note = $('note-input').value.trim().slice(0, 300);
+  if (note) current.note = note;
+  else delete current.note;
   save();
   paintView();
   paintHistory();
@@ -1428,11 +1776,13 @@ $('confirm-remove').addEventListener('click', () => {
     $('settings-dialog').close();
     chats = [];
     drafts.clear();
+    writeDrafts();
     prompt.value = '';
   } else {
     $('options-dialog').close();
     chats = chats.filter((chat) => chat !== removeTarget);
     drafts.delete(removeTarget.id);
+    writeDrafts();
     prompt.value = '';
   }
   removeTarget = undefined;
@@ -1441,6 +1791,14 @@ $('confirm-remove').addEventListener('click', () => {
   paintSettings();
   toast(all ? 'Chat history cleared' : 'Chat deleted');
 });
+
+// The whole app is a few files; caching them makes it open offline and
+// installable. A local development server keeps the plain network path.
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(new URL('./sw.js', import.meta.url)).catch(() => {});
+  });
+}
 
 paintSidebar();
 openChat(chatFromUrl(), { fromUrl: true, focus: false });

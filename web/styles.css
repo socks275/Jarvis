@@ -672,3 +672,22 @@ a.connector-item:hover { color: #fff; text-decoration: underline; }
 .setup-steps code { padding: 1px 5px; border-radius: 5px; background: #241d38; color: #f0d9ff; font-size: .86em; }
 .connector .settings-buttons { margin-top: 2px; }
 .connector-example { margin: 0; }
+
+/* Composer extras: wait estimate, character budget, edit banner. */
+.eta-note { font-size: 11px; color: var(--quiet); white-space: nowrap; }
+.char-count { font: 500 11px/1 var(--mono); color: var(--quiet); white-space: nowrap; }
+.char-count[data-tone='near'] { color: #f0c38f; }
+.char-count[data-tone='limit'] { color: #f2919a; }
+.edit-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; padding: 8px 11px; border: 1px solid #6a4a3a; border-radius: 10px; background: #2f2418; color: #f0d9b8; font-size: 12px; }
+.edit-banner[hidden] { display: none; }
+
+/* Settings: instructions, activity, shortcuts. */
+.persona-field { min-height: 62px; resize: vertical; font: 400 13px/1.5 var(--sans); }
+.label-hint { color: var(--quiet); font-weight: 500; }
+.activity-log { max-height: 190px; margin: 8px 0 0; padding: 9px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; background: #14111b; color: #cfc2e0; font: 500 11px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.export-buttons { flex-wrap: wrap; }
+.shortcut-list { display: grid; gap: 7px; margin: 4px 0 10px; padding: 0; list-style: none; font-size: 13px; }
+.shortcut-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.shortcut-list kbd { font: 600 11px/1.6 var(--mono); padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px; background: #221b2e; color: #e1cff5; }
+.message-user .message-actions { justify-content: flex-end; margin-top: 4px; }
+.history-pinned { margin-left: auto; padding: 1px 6px; border: 1px solid #5b4468; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #cdb4e6; }

@@ -11,6 +11,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#17141f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
 </head>
@@ -109,6 +112,7 @@
           </div>
           <div id="welcome-composer" class="welcome-composer">
             <section class="composer-group" id="composer" aria-label="Message composer">
+              <div class="edit-banner" id="edit-banner" hidden><span>Editing an earlier message — sending replaces it and everything after.</span><button type="button" class="text-action" id="cancel-edit">Cancel</button></div>
               <div class="composer-box">
                 <label for="prompt" class="sr-only">Message Chorus</label>
                 <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
@@ -116,6 +120,8 @@
                   <button type="button" class="deep-button direct-chip" id="direct-chip" hidden aria-pressed="false" title="Uncensored mode is on: replies are asked to answer without hedging. Click to open Settings."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Uncensored</button>
                   <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
                   <span class="composer-spacer"></span>
+                  <span class="eta-note" id="eta-note" hidden></span>
+                  <span class="char-count" id="char-count" aria-live="polite" hidden></span>
                   <span class="key-hint" aria-hidden="true"><kbd>↵</kbd> Enter to send</span>
                   <button type="button" id="send-button" class="send-button" aria-label="Send message" title="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
                   <button type="button" id="stop-button" class="send-button stop-button" aria-label="Stop generating" title="Stop generating" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg></button>
@@ -140,7 +146,8 @@
       <div class="dock chat-width" id="chat-dock" hidden>
         <button type="button" class="icon-button scroll-latest" id="scroll-latest" aria-label="Scroll to latest message" title="Scroll to latest message" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button>
       </div>
-      <footer class="main-footer"><p>AI can make mistakes. Check important information.</p><span aria-hidden="true">·</span><button type="button" class="text-action" id="open-privacy">Privacy</button></footer>
+      <footer class="main-footer"><p>AI can make mistakes. Check important information.</p><span aria-hidden="true">·</span><button type="button" class="text-action" id="open-shortcuts">Shortcuts</button>
+        <span aria-hidden="true">·</span><button type="button" class="text-action" id="open-privacy">Privacy</button></footer>
       <aside class="canvas" id="canvas" aria-label="Canvas" hidden>
         <div class="canvas-top">
           <div class="canvas-tabs" role="tablist" aria-label="Canvas view">
@@ -185,7 +192,10 @@
         <div><strong id="direct-label">Uncensored mode</strong><p>Ask the models to answer what you asked, without hedging: no lectures, no disclaimers, no moral verdict, and fiction answered as fiction.</p></div>
         <button type="button" class="switch" id="direct-toggle" role="switch" aria-checked="false" aria-labelledby="direct-label" title="Turn uncensored mode on"><span aria-hidden="true"></span></button>
       </div>
-      <p class="fine-print">This changes the instructions Chorus sends, nothing else: your messages still go to the same models, and a model’s own training still has the last word. When every model declines, the reply tells you so plainly instead of inventing an answer — switching the mode off will not make a model take it on. It applies to replies you start from now on.</p>
+      <label class="text-label" for="persona-input">How should Chorus answer?</label>
+      <textarea class="text-field persona-field" id="persona-input" rows="3" maxlength="600" placeholder="For example: answer in British English, keep it short, show the code first and explain it after."></textarea>
+      <p class="fine-print" id="persona-note">Sent with every reply in this browser. Leave it empty for the default.</p>
+      <p class="fine-print">Uncensored mode changes the instructions Chorus sends, nothing else: your messages still go to the same models, and a model’s own training still has the last word. When every model declines, the reply tells you so plainly instead of inventing an answer — switching the mode off will not make a model take it on. It applies to replies you start from now on.</p>
     </div>
 <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
@@ -199,8 +209,24 @@
       <p>Only on-device chat needs a download. Your model and on-device messages stay in this browser. Select the file again after reloading the page.</p>
       <label class="file-picker" for="model-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span id="file-label">Choose a .gguf file</span><input type="file" id="model-file" accept=".gguf" class="sr-only"></label>
       <p id="model-error" class="model-error" role="alert" hidden></p>
+      <p id="model-window" class="fine-print" hidden></p>
       <div class="settings-buttons"><button class="text-action" type="button" id="clear-model" hidden>Remove selected file</button></div>
       <p class="fine-print">Need a model? <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" target="_blank" rel="noopener noreferrer">Qwen2.5 (491 MB)</a> or <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" target="_blank" rel="noopener noreferrer">SmolLM2 (271 MB)</a>.</p>
+    </div>
+    <div class="settings-box" id="model-picks">
+      <h3>Models</h3>
+      <p>Community replies are routed by capacity, quality and how busy each model is. These two lists let you steer that without touching anything else.</p>
+      <p class="fine-print" id="pinned-model">Preferred model: <strong id="pinned-name">automatic</strong></p>
+      <p class="fine-print" id="banned-models">Never used: <span id="banned-names">nothing</span></p>
+      <div class="settings-buttons"><button class="text-action" type="button" id="clear-model-picks">Clear both lists</button></div>
+      <p class="fine-print">Pin or block a model from the buttons under any reply that used it.</p>
+    </div>
+    <div class="settings-box" id="reading-settings">
+      <h3>Reading pages</h3>
+      <p>Put a link in a message and Chorus reads the page before the models answer, so the reply can be about what it actually says. Browsers cannot read another site directly, so this uses your relay (the same one as GitHub sign-in).</p>
+      <label class="text-label" for="read-relay">Reader relay URL</label>
+      <input type="url" class="text-field" id="read-relay" maxlength="500" placeholder="https://chorus-oauth.your-name.workers.dev" autocomplete="off" spellcheck="false">
+      <p class="fine-print" id="read-relay-note">Deploy the relay once and paste its address here. Pages are read only when you link them, never in the background.</p>
     </div>
     <div class="settings-box" id="youtube-settings">
       <h3>YouTube</h3>
@@ -212,6 +238,12 @@
       <div class="connector-list" id="connector-list"></div>
       <p class="fine-print">A key is stored in this browser only. It is never shown again after saving, never put in a chat message, and never sent to a model — only to the service it belongs to.</p>
       <div class="settings-buttons"><button type="button" class="text-action danger-text" id="forget-connectors">Forget every key</button></div>
+    </div>
+    <div class="settings-box" id="activity-settings">
+      <h3>Activity</h3>
+      <p>What actually happened on the last replies: which models were tried, what the queue said, and any error in the provider's own words. Nothing leaves your browser.</p>
+      <pre class="activity-log" id="activity-log" tabindex="0">No activity yet.</pre>
+      <div class="settings-buttons"><button class="text-action" type="button" id="copy-activity">Copy</button><button class="text-action" type="button" id="clear-activity">Clear</button></div>
     </div>
     <div class="settings-history"><div><h3>Chat history</h3><p>Your chats are saved in this browser only.</p></div><button type="button" class="button border-button danger-text" id="clear-chats">Clear all chats</button></div>
   </dialog>
@@ -226,6 +258,15 @@
   <dialog class="dialog" id="options-dialog" aria-labelledby="options-title">
     <div class="dialog-top"><h2 id="options-title">Chat options</h2><button type="button" class="icon-button" data-close aria-label="Close chat options"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <label class="text-label" for="rename-input">Chat title</label><input type="text" id="rename-input" class="text-field" maxlength="80" autofocus>
+    <label class="text-label" for="note-input">About this chat <span class="label-hint">optional</span></label>
+    <textarea class="text-field" id="note-input" rows="2" maxlength="300" placeholder="Anything the models should know: the project, the audience, the house style."></textarea>
+    <p class="fine-print">Sent with every reply in this chat only.</p>
+    <div class="settings-buttons export-buttons">
+      <button type="button" class="text-action" id="export-md">Download .md</button>
+      <button type="button" class="text-action" id="export-json">Download .json</button>
+      <button type="button" class="text-action" id="copy-md">Copy as Markdown</button>
+      <button type="button" class="text-action" id="pin-chat" aria-pressed="false">Pin chat</button>
+    </div>
     <div class="dialog-actions split"><button type="button" class="button border-button danger-text" id="delete-chat"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete chat</button><button type="button" class="button primary" id="save-title">Save title</button></div>
   </dialog>
 
@@ -246,6 +287,21 @@
     <div class="dialog-top"><h2 id="remove-title">Delete chat?</h2><button type="button" class="icon-button" data-close aria-label="Close delete confirmation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <p id="remove-description">This permanently removes the chat from this browser.</p>
     <div class="dialog-actions"><button type="button" class="button border-button" data-close autofocus>Cancel</button><button type="button" class="button danger" id="confirm-remove">Delete</button></div>
+  </dialog>
+
+  <dialog class="dialog" id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+    <div class="dialog-top"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button type="button" class="icon-button" data-close aria-label="Close shortcuts"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <ul class="shortcut-list">
+      <li><kbd id="shortcut-search">Ctrl K</kbd><span>Search chats</span></li>
+      <li><kbd id="shortcut-new">Ctrl Shift O</kbd><span>New chat</span></li>
+      <li><kbd id="shortcut-settings">Ctrl ,</kbd><span>Settings</span></li>
+      <li><kbd id="shortcut-copy">Ctrl Shift C</kbd><span>Copy the last reply</span></li>
+      <li><kbd id="shortcut-again">Ctrl Shift R</kbd><span>Try the last reply again</span></li>
+      <li><kbd id="shortcut-help">Ctrl /</kbd><span>This list</span></li>
+      <li><kbd>Esc</kbd><span>Close a dialog or the canvas</span></li>
+    </ul>
+    <p class="fine-print">On a Mac, use ⌘ instead of Ctrl.</p>
+    <div class="dialog-actions"><button type="button" class="button primary" data-close>Got it</button></div>
   </dialog>
 
   <dialog class="dialog" id="privacy-dialog" aria-labelledby="privacy-title">
