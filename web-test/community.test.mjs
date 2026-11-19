@@ -87,6 +87,31 @@ test('only complete older turns are removed when resizing conversation context',
   assert.throws(() => planCommunityRequest([{ id: 'no-fit', context: 128, tokens: 96 }], { messages, purpose: 'answer' }), /cannot fit/);
 });
 
+test('a coding message is offered the code models first and sampled less', () => {
+  const models = [
+    { id: 'chatty/general', count: 9, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'Qwen2.5-Coder-32B', count: 1, context: 8192, tokens: 1024, queue: 40 },
+  ];
+  const code = planCommunityRequest(models, { messages, purpose: 'answer', code: true });
+  assert.equal(code.models[0], 'Qwen2.5-Coder-32B');
+  assert.equal(code.temperature, 0.2);
+  const chat = planCommunityRequest(models, { messages, purpose: 'answer' });
+  assert.equal(chat.models[0], 'chatty/general');
+  assert.equal(chat.temperature, 0.55);
+});
+
+test('the engine sends the code flag through to the request it builds', async () => {
+  let sent;
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('plain/chat'), card('deepseek-coder-33b'));
+    sent = JSON.parse(options.body);
+    return stream([event({ choices: [{ delta: { content: 'ok' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+  } });
+  await generate({ messages, purpose: 'answer', signal: signal(), code: true });
+  assert.equal(sent.models[0], 'deepseek-coder-33b');
+  assert.equal(sent.temperature, 0.2);
+});
+
 test('sends chat roles anonymously, reports queue hints, decodes actual deltas and records the final model', async () => {
   const phases = [], updates = [];
   let posts = 0;

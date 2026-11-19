@@ -205,7 +205,12 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
   return [...models.values()].sort((a, b) => (a.queue / a.count - b.queue / b.count) || b.count - a.count || a.id.localeCompare(b.id));
 }
 
-export function planCommunityRequest(models, { messages, purpose, preferOtherThan }) {
+// Model names that say "trained on code". A coding task gives them the first
+// slot; capacity still decides among equals, so a busy coder does not win.
+const CODE_MODEL = /(?:coder|codestral|codeqwen|starcoder|codegen|devstral|deepseek|qwen|code-?llama|gemma-?code)/i;
+const codeFit = (model) => (CODE_MODEL.test(model.id) ? 1 : 0);
+
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false }) {
   if (!models.length) throw new CommunityError('No text models are online in the community pool. Try again later.');
   const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
   let reduced;
@@ -226,10 +231,18 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // written by a different model than the draft it is working from.
     const avoid = preferOtherThan ? [].concat(preferOtherThan) : [];
     const others = avoid.length ? fitting.filter((m) => !avoid.includes(m.id)) : [];
-    const candidates = (others.length ? others : fitting).slice(0, MAX_CANDIDATES);
+    const pool = others.length ? others : fitting;
+    // A coding task also wants the roomier models: a long answer is cut short
+    // by a small context just as surely as by a small token budget.
+    const ordered = code
+      ? [...pool].sort((a, b) => (codeFit(b) - codeFit(a)) || (b.room - a.room) || a.id.localeCompare(b.id))
+      : pool;
+    const candidates = ordered.slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
-      max_tokens: Math.min(...candidates.map(({ room }) => room)), temperature: 0.55,
+      max_tokens: Math.min(...candidates.map(({ room }) => room)),
+      // Code is written, not improvised: less sampling, fewer invented APIs.
+      temperature: code ? 0.2 : 0.55,
       horde: { context_fit: 'grow', include_reasoning: false },
     };
   }
@@ -237,12 +250,12 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
 
 export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLimit = () => {}, fetchImpl = globalThis.fetch } = {}) {
   return {
-    async generate({ messages, signal, purpose, preferOtherThan, onText }) {
+    async generate({ messages, signal, purpose, preferOtherThan, onText, code = false }) {
       const plan = async () => {
         onPhase('finding');
         const models = await getOnlineModels({ signal, fetchImpl });
         onModels(models);
-        return planCommunityRequest(models, { messages, purpose, preferOtherThan });
+        return planCommunityRequest(models, { messages, purpose, preferOtherThan, code });
       };
       const complete = async (body) => {
         onPhase('waiting');
