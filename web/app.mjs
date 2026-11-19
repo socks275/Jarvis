@@ -357,7 +357,18 @@ function videoCard(video, { pending = false, onRetry } = {}) {
       player.title = video.title || 'YouTube video';
       player.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
       player.allowFullscreen = true;
-      frame.replaceChildren(player);
+      // Closing the player removes the frame entirely, so YouTube stops running
+      // and any cookies it held for the session are dropped with it.
+      const close = el('button', 'video-close');
+      close.type = 'button';
+      close.title = 'Close the player';
+      close.setAttribute('aria-label', 'Close the player');
+      close.append(icon('close'));
+      close.addEventListener('click', () => {
+        frame.replaceChildren(poster);
+        poster.focus({ preventScroll: true });
+      });
+      frame.replaceChildren(player, close);
       player.focus({ preventScroll: true });
     });
     frame.append(poster);
@@ -370,7 +381,10 @@ function videoCard(video, { pending = false, onRetry } = {}) {
     link.href = watchUrl(video.id);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    meta.append(link);
+    const privacy = el('span', 'video-privacy');
+    privacy.append(icon('lock'), document.createTextNode('No-cookie player'));
+    privacy.title = 'Plays through youtube-nocookie.com, which sets no cookies before you press play';
+    meta.append(link, privacy);
   } else if (video.query) {
     const link = el('a', 'video-link', `Search YouTube for “${video.query}”`);
     link.href = searchUrl(video.query);

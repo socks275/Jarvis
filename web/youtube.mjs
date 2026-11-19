@@ -56,9 +56,12 @@ function tidy(value) {
 export const watchUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
 export const thumbnailUrl = (id) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
 export const searchUrl = (query) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-// The plain embed parameters YouTube documents today. `modestbranding` is
-// deprecated, and `playsinline` keeps iOS from hijacking the player full screen.
-export const embedUrl = (id, { auto = true } = {}) => `https://www.youtube-nocookie.com/embed/${id}`
+// The no-cookie player. youtube-nocookie.com stores nothing until someone
+// presses play, and it only ever receives this site's origin, never the chat.
+// `modestbranding` is deprecated, and `playsinline` stops iOS hijacking the
+// player into full screen.
+export const PLAYER_ORIGIN = 'https://www.youtube-nocookie.com';
+export const embedUrl = (id, { auto = true } = {}) => `${PLAYER_ORIGIN}/embed/${id}`
   + `?rel=0&playsinline=1${auto ? '&autoplay=1' : ''}`;
 
 // Public front-ends that answer a search without an account or an API key.

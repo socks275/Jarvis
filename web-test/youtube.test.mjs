@@ -41,6 +41,13 @@ test('asks every instance at once and keeps the plain phrase when it can', async
   assert.equal(seen.length, 3);
 });
 
+test('the player is the no-cookie one, on youtube-nocookie.com', () => {
+  const url = new URL(embedUrl('dQw4w9WgXcQ'));
+  assert.equal(url.origin, 'https://www.youtube-nocookie.com');
+  assert.equal(url.pathname, '/embed/dQw4w9WgXcQ');
+  assert.ok(!embedUrl('dQw4w9WgXcQ').includes('://www.youtube.com/embed'));
+});
+
 test('builds embed, thumbnail and search links', () => {
   assert.equal(embedUrl('dQw4w9WgXcQ'), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&playsinline=1&autoplay=1');
   assert.equal(embedUrl('dQw4w9WgXcQ', { auto: false }), 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0&playsinline=1');
