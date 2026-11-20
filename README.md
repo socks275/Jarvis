@@ -210,17 +210,17 @@ npm run build
 
 Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) on its free plan. For Git-connected hosting, use `npm run build` for the build command and `dist` for the output directory. The host must serve `.mjs` as JavaScript and `.wasm` as `application/wasm`. There is no inference backend to deploy. Community mode requires browser access to `https://oai.aihorde.net`. The build bundles fonts, the local runtime, Markdown rendering and license notices, but no model weights.
 
-### Custom domain
+### Custom domain (only once DNS answers)
 
-The site is published on **https://chorus.work.gd**, and the domain travels with the build: [`web/CNAME`](web/CNAME) holds it, `npm run build` copies it to `dist/CNAME`, and the deploy workflow publishes it. For GitHub Pages that file is what keeps the domain attached across deploys — without it, a deploy can quietly drop the custom domain.
+The site is published at **https://socks275.github.io/Jarvis/** by default, and a custom domain is opt-in because of one sharp edge: a `CNAME` file in the published artifact **sets the GitHub Pages custom domain immediately**, whether or not the DNS record exists. Publish it too early and GitHub redirects the working `socks275.github.io` URL to a domain that still points somewhere else — the site appears to go down.
 
-Three things have to agree, and only the first is in this repository:
+So, in this order only:
 
-1. **The file.** `web/CNAME` holds the bare domain, lower case, no scheme and no trailing dot. The build refuses anything else, so a typo fails rather than publishing.
-2. **The DNS record** at the domain's provider. For a subdomain like `chorus.work.gd`, a `CNAME` from `chorus` to `socks275.github.io` is the right record. If the provider does not allow CNAMEs, use GitHub's four `A` records instead — `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153` — and no others. A redirect or "URL forwarding" product cannot serve the site, only bounce it.
-3. **Repository → Settings → Pages → Custom domain**, which must say the same bare domain. GitHub provisions a certificate once the DNS answers; **Enforce HTTPS** becomes selectable after that, not before.
+1. **Make the DNS record answer first.** For `chorus.work.gd`: a `CNAME` from `chorus` → `socks275.github.io` (or GitHub's four `A` records — `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153` — if the provider has no alias form for the bare name). Check with `dig chorus.work.gd +short`; it must answer with a GitHub Pages address before step 2.
+2. **Then add `web/CNAME`** containing the bare domain, lower case, no scheme, no trailing dot, and set the same domain in **Settings → Pages → Custom domain**.
+3. GitHub provisions a certificate on its own; tick **Enforce HTTPS** once it is offered.
 
-To move to a different domain later: edit `web/CNAME`, change the DNS at the provider, and change the custom domain in Settings — in that order. Nothing in the app hard-codes the hostname, so relative links, the service worker scope and the OAuth callback all follow automatically. `dig chorus.work.gd CNAME +short` should answer `socks275.github.io.`.
+The build normalises that file and refuses anything that is not a bare domain, since a wrong value silently drops the domain on the next deploy. Removing `web/CNAME` and deploying again clears the custom domain and returns the site to the `socks275.github.io/Jarvis/` address. Nothing in the app hard-codes a hostname, so links, the service worker scope and the OAuth callback all follow the domain without changes.
 
 ## Tests and upstream
 
