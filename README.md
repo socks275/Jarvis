@@ -210,6 +210,18 @@ npm run build
 
 Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) on its free plan. For Git-connected hosting, use `npm run build` for the build command and `dist` for the output directory. The host must serve `.mjs` as JavaScript and `.wasm` as `application/wasm`. There is no inference backend to deploy. Community mode requires browser access to `https://oai.aihorde.net`. The build bundles fonts, the local runtime, Markdown rendering and license notices, but no model weights.
 
+### Custom domain
+
+The site is published on **https://chorus.work.gd**, and the domain travels with the build: [`web/CNAME`](web/CNAME) holds it, `npm run build` copies it to `dist/CNAME`, and the deploy workflow publishes it. For GitHub Pages that file is what keeps the domain attached across deploys — without it, a deploy can quietly drop the custom domain.
+
+Three things have to agree, and only the first is in this repository:
+
+1. **The file.** `web/CNAME` holds the bare domain, lower case, no scheme and no trailing dot. The build refuses anything else, so a typo fails rather than publishing.
+2. **The DNS record** at the domain's provider. For a subdomain like `chorus.work.gd`, a `CNAME` from `chorus` to `socks275.github.io` is the right record. If the provider does not allow CNAMEs, use GitHub's four `A` records instead — `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153` — and no others. A redirect or "URL forwarding" product cannot serve the site, only bounce it.
+3. **Repository → Settings → Pages → Custom domain**, which must say the same bare domain. GitHub provisions a certificate once the DNS answers; **Enforce HTTPS** becomes selectable after that, not before.
+
+To move to a different domain later: edit `web/CNAME`, change the DNS at the provider, and change the custom domain in Settings — in that order. Nothing in the app hard-codes the hostname, so relative links, the service worker scope and the OAuth callback all follow automatically. `dig chorus.work.gd CNAME +short` should answer `socks275.github.io.`.
+
 ## Tests and upstream
 
 ```sh
