@@ -1,4 +1,4 @@
-import { copyFile, cp, mkdir, rm } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
@@ -30,4 +30,20 @@ await Promise.all([
   copyFile(at('LICENSE'), at('dist/licenses/frenemy.txt')),
   ...assets.map(([from, to]) => copyFile(at(packages + from), at(`dist/${to}`))),
 ]);
+// A custom domain is published as a plain CNAME file. It is normalised here so
+// a stray scheme, path or trailing dot fails the build instead of silently
+// clearing the domain on the next deploy.
+async function writeCname() {
+  let raw;
+  try { raw = await readFile(at('web/CNAME'), 'utf8'); }
+  catch { return; }
+  const domain = raw.trim().toLowerCase();
+  if (!/^(?!-)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+$/.test(domain)) {
+    throw new Error(`web/CNAME must be a bare domain such as chorus.work.gd — found "${raw.trim()}". No https://, no path, no trailing dot.`);
+  }
+  await writeFile(at('dist/CNAME'), `${domain}\n`);
+  console.log(`Custom domain: ${domain}`);
+}
+
+await writeCname();
 console.log('Built the static Chorus website in dist/.');
