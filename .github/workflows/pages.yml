@@ -67,7 +67,7 @@ jobs:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           for attempt in 1 2 3 4 5 6; do
-            body="$(curl -fsSL "$PAGE_URL" || true)"
+            body="$(curl --connect-timeout 10 --max-time 20 -fsSL "$PAGE_URL" || true)"
             case "$body" in
               *"<title>Chorus"*) echo "The live site is serving Chorus."; exit 0 ;;
             esac

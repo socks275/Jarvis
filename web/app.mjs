@@ -2,6 +2,7 @@ import MarkdownIt from './vendor/markdown-it.mjs';
 import { createFormatter } from './format.mjs';
 import { answerChat, chatToJson, chatToMarkdown, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, PROMPT_LIMIT, readChats, rewindTo, saveChats } from './chat.mjs';
 import { communityEngine, describeWait, getOnlineModels, waitEstimate } from './community.mjs';
+import { webLLMEngine, chromeAIEngine, disposeWebLLM } from './accelerated.mjs';
 import { browserEngine, contextWindow, disposeLocal, validateModel } from './engine.mjs';
 import { fetchPage, findUrls, sourceContext } from './read.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
@@ -246,9 +247,9 @@ function paintSearch() {
 
 function paintConnection() {
   const community = engine === 'community';
-  const label = community ? 'Community AI' : 'On-device';
+  const label = ({ community: 'Community AI', local: 'On-device GGUF', webllm: 'WebLLM', chrome: 'Chrome Built-in AI' })[engine];
   $('sidebar-engine').textContent = $('top-engine').textContent = label;
-  $('sidebar-engine-note').textContent = community ? 'Free · no key required' : localFile ? 'Model ready on this device' : 'Choose a GGUF file';
+  $('sidebar-engine-note').textContent = community ? 'Free · no key required' : engine === 'local' ? (localFile ? 'Model ready on this device' : 'Choose a GGUF file') : 'Runs on this device';
   for (const id of ['sidebar-engine-icon', 'top-engine-icon']) $(id).setAttribute('href', community ? '#i-globe' : '#i-device');
   paintComposer();
   paintSettings();
@@ -266,7 +267,7 @@ function paintComposer() {
   $('send-button').hidden = writing;
   $('send-button').disabled = blocked() || !prompt.value.trim();
   $('stop-button').hidden = !writing;
-  $('deep-button').hidden = engine === 'local';
+  $('deep-button').hidden = engine !== 'community';
   $('deep-button').disabled = Boolean(active);
   $('deep-button').setAttribute('aria-pressed', String(deeper));
   const wait = engine === 'community' && !active && !cooldown ? describeWait(eta) : '';
@@ -334,6 +335,9 @@ function paintSettings() {
   $('activity-log').textContent = activityText();
   $('community-settings').hidden = engine !== 'community';
   $('local-settings').hidden = engine !== 'local';
+  $('webllm-settings').hidden = engine !== 'webllm';
+  $('chrome-settings').hidden = engine !== 'chrome';
+  $('webllm-model').disabled = locked;
   $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
     ? 'Availability hasn’t been checked yet.' : models.length
       ? `${models.length} ${models.length === 1 ? 'text model was' : 'text models were'} online at the last check.`
@@ -1272,7 +1276,7 @@ async function generate(chat, message) {
       note('roster', `${list.length} models online${pinned ? `, preferring ${pinned}` : ''}${banned.length ? `, avoiding ${banned.length}` : ''}`);
       if ($('settings-dialog').open) paintSettings();
     },
-  }) : browserEngine(localFile, onPhase, { context: contextWindow(localContext) });
+  }) : message.engine === 'webllm' ? webLLMEngine($('webllm-model').value, onPhase, text => { $('webllm-status').textContent = text; }) : message.engine === 'chrome' ? chromeAIEngine(onPhase) : browserEngine(localFile, onPhase, { context: contextWindow(localContext) });
   chat.updatedAt = Date.now();
   save();
   paintView(true);
@@ -1288,7 +1292,7 @@ async function generate(chat, message) {
     if (controller.signal.aborted) throw controller.signal.reason;
     // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
-      signal: controller.signal, deep: message.deep, direct: message.raw === true, mode: message.engine === 'local' ? 'solo' : undefined,
+      signal: controller.signal, deep: message.deep, direct: message.raw === true, mode: message.engine !== 'community' ? 'solo' : undefined,
       decide: message.engine === 'community',
       onText(text) {
         // The draft stays on screen while the final pass writes, so the answer
@@ -1662,10 +1666,12 @@ scroll.addEventListener('scroll', syncScroll, { passive: true });
 for (const option of engineOptions) option.addEventListener('change', () => {
   if (active || validatingFile) return;
   engine = option.value;
-  if (engine === 'local') statusController?.abort();
+  if (engine !== 'community') statusController?.abort();
+  if (engine !== 'webllm') disposeWebLLM();
   paintConnection();
   paintThread();
 });
+$('webllm-model').addEventListener('change', () => { disposeWebLLM(); $('webllm-status').textContent = 'The selected model will download when you send a message.'; });
 $('check-network').addEventListener('click', async () => {
   if (active || statusController || retryAt > Date.now()) return;
   const check = new AbortController();
