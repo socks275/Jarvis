@@ -97,3 +97,21 @@ test('the worker keeps the model loaded between replies and is dropped on stop',
     else delete globalThis.Worker;
   }
 });
+
+test('local coding requests reserve more output and use code sampling in the worker', async () => {
+  const previous = globalThis.Worker;
+  let worker;
+  globalThis.Worker = class extends EventTarget {
+    constructor() { super(); worker = this; }
+    postMessage(payload) { this.payload = payload; }
+    terminate() {}
+  };
+  try {
+    const engine = browserEngine(fixture(), () => {}, { context: 4096 });
+    const pending = engine.generate({ messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'write code' }], signal: new AbortController().signal, code: true });
+    assert.equal(worker.payload.maxTokens, 768);
+    assert.equal(worker.payload.code, true);
+    worker.dispatchEvent(new MessageEvent('message', { data: { type: 'result', text: 'ok' } }));
+    await pending;
+  } finally { disposeLocal(); globalThis.Worker = previous; }
+});

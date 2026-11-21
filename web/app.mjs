@@ -861,7 +861,7 @@ function messageNode(message, last) {
     if (active?.message === message) pendingNodes = { body, waiting, label, trace };
     return row;
   }
-  const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'This reply is already as long as one message can hold. Ask a follow-up to carry on.' : '');
+  const note = message.warning || (message.status === 'stopped' ? 'You stopped this reply.' : message.limited ? 'This reply may be incomplete. Ask a follow-up to carry on.' : '');
   if (note) {
     const info = el('p', 'answer-note', note);
     if (message.status === 'error') info.dataset.tone = 'error';

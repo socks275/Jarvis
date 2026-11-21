@@ -311,3 +311,94 @@ test('the wait estimate is drawn from the queue and stays a rounded estimate', (
   assert.equal(describeWait(waitEstimate([{ id: 'a', count: 1, queue: 0 }], { tokens: 64 })), '1 model online · under 20 seconds');
   assert.equal(describeWait(undefined), '');
 });
+
+test('code routing prioritises explicitly code-trained names, not every general Qwen model', () => {
+  const models = [
+    { id: 'Qwen2.5-70B-Instruct', count: 5, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'Qwen2.5-Coder-7B-Instruct', count: 3, context: 8192, tokens: 1024, queue: 0 },
+  ];
+  const request = planCommunityRequest(models, { messages, purpose: 'review', code: true });
+  assert.equal(request.models[0], 'Qwen2.5-Coder-7B-Instruct');
+  assert.equal(request.max_tokens, 512);
+});
+
+test('resizing preserves the latest request with optional system messages or fails explicitly', () => {
+  const current = { role: 'user', content: 'my current request ' + 'x'.repeat(1000) };
+  const history = [{ role: 'system', content: 'rules' }, { role: 'system', content: 'source data' }, current];
+  const planned = planCommunityRequest([{ id: 'm', context: 700, tokens: 128, count: 1, queue: 0 }], { messages: history });
+  assert.equal(planned.messages.at(-1), current);
+  assert.throws(() => planCommunityRequest([{ id: 'm', context: 128, tokens: 128, count: 1, queue: 0 }], { messages: history }), /cannot fit/);
+});
+
+test('resizing a continuation never loses the original task or partial code', () => {
+  const latest = { role: 'user', content: 'Write a function' };
+  const partial = { role: 'assistant', content: '```python\ndef f():' };
+  const resume = { role: 'user', content: 'Continue exactly where the previous answer stopped. Do not repeat anything, do not apologise, and do not start over.' };
+  const history = [{ role: 'system', content: 'rules' }, { role: 'user', content: 'old'.repeat(900) }, { role: 'assistant', content: 'old answer' }, latest, partial, resume];
+  const planned = planCommunityRequest([{ id: 'm', context: 600, tokens: 128, count: 1, queue: 0 }], { messages: history });
+  assert.deepEqual(planned.messages.slice(-3), [latest, partial, resume]);
+  assert.throws(() => planCommunityRequest([{ id: 'm', context: 80, tokens: 128, count: 1, queue: 0 }], { messages: history }), /cannot fit/);
+});
+
+test('community continuations retain whitespace in JSON and streamed replies', async () => {
+  for (const streamed of [false, true]) {
+    const { generate } = communityEngine({ fetchImpl: async (url) => {
+      if (url.endsWith('/models')) return list(card('worker/A'));
+      if (!streamed) return completion('worker/A', '    return 42\n');
+      return stream([event({ model: 'worker/A', choices: [{ delta: { content: '    return 42\n' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+    } });
+    const result = await generate({ messages, purpose: 'continue', signal: signal() });
+    assert.equal(result.text, '    return 42\n');
+  }
+});
+
+test('coding uses the newer available families as the actual candidate set', () => {
+  const models = [
+    { id: 'Qwen/Qwen2.5-Coder-32B-Instruct', count: 3, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'Qwen/Qwen3-Coder-30B-A3B-Instruct', count: 1, context: 8192, tokens: 512, queue: 2 },
+    { id: 'mistralai/Devstral-Small-2-24B-Instruct', count: 1, context: 8192, tokens: 1024, queue: 4 },
+    { id: 'Qwen/Qwen3-Coder-30B-A3B-Base', count: 1, context: 8192, tokens: 1024, queue: 0 },
+    { id: 'general/70B-Instruct', count: 1, context: 8192, tokens: 1024, queue: 0 },
+  ];
+  const request = planCommunityRequest(models, { messages, purpose: 'draft', code: true });
+  assert.deepEqual(new Set(request.models), new Set([models[1].id, models[2].id]));
+  assert.equal(request.max_tokens, 512);
+  assert.ok(!request.models.includes(models[0].id));
+  const review = planCommunityRequest(models, { messages, purpose: 'review', code: true, preferOtherThan: models[1].id });
+  assert.deepEqual(review.models, [models[2].id]);
+  const pinned = planCommunityRequest(models, { messages, purpose: 'draft', code: true, pinned: models[0].id });
+  assert.equal(pinned.models[0], models[0].id);
+  const lowerBudgetPin = planCommunityRequest([{ ...models[0], tokens: 512 }, models[2]], { messages, purpose: 'draft', code: true, pinned: models[0].id });
+  assert.equal(lowerBudgetPin.models[0], models[0].id);
+  const banned = planCommunityRequest(models, { messages, purpose: 'draft', code: true, banned: [models[1].id, models[2].id] });
+  assert.deepEqual(banned.models, [models[0].id]);
+});
+
+test('coding falls back to the rest of the roster after a documented stale-model refusal', async () => {
+  let requests = 0, lookups = 0;
+  const sent = [];
+  const newer = 'Qwen/Qwen3-Coder-30B-A3B-Instruct';
+  const older = 'Qwen/Qwen2.5-Coder-32B-Instruct';
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) { lookups++; return list(card(newer), card(older), card('general')); }
+    sent.push(JSON.parse(options.body).models); requests++;
+    return requests === 1 ? refusal('UnknownChatModel', 404) : completion(older, 'working answer');
+  } });
+  const result = await generate({ messages, signal: signal(), purpose: 'draft', code: true });
+  assert.equal(result.model, older);
+  assert.deepEqual(sent, [[newer], [older]]);
+  assert.equal(lookups, 2);
+});
+
+test('a coding-model timeout or cooldown never triggers an alternate submission', async () => {
+  for (const response of [refusal('rate_limit_exceeded', 429, { 'Retry-After': '12' }), refusal('request_timeout', 504)]) {
+    let requests = 0;
+    const { generate } = communityEngine({ fetchImpl: async (url) => {
+      if (url.endsWith('/models')) return list(card('Qwen3-Coder-30B'), card('general'));
+      requests++;
+      return response;
+    } });
+    await assert.rejects(generate({ messages, signal: signal(), purpose: 'draft', code: true }));
+    assert.equal(requests, 1);
+  }
+});

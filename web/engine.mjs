@@ -4,6 +4,7 @@ import { ggufContextLength } from './gguf.mjs';
 const MAX_MODEL_BYTES = 1_200_000_000;
 const TIMEOUT = 5 * 60 * 1000;
 const TOKENS = 384;
+const CODE_TOKENS = 768;
 export const LOCAL_CONTEXT = 4096;
 const CONTEXT_FLOOR = 2048;
 const HEADER_BYTES = 4_000_000;
@@ -55,10 +56,15 @@ const keyOf = (file) => `${file.name}:${file.size}:${file.lastModified ?? 0}`;
 // Only the browser's own worker receives the file and messages.
 export function browserEngine(file, onPhase = () => {}, { context = LOCAL_CONTEXT } = {}) {
   return {
-    async generate({ messages, signal, onText = () => {} }) {
+    async generate({ messages, signal, onText = () => {}, code = false, purpose }) {
       signal.throwIfAborted();
-      while (messages.length > 2 && estimateTokens(messages) + TOKENS > context) messages = shorterContext(messages);
-      if (estimateTokens(messages) + TOKENS > context) throw new Error('This message is too long for the local model. Try shortening it.');
+      const maxTokens = code ? CODE_TOKENS : TOKENS;
+      while (estimateTokens(messages) + maxTokens > context) {
+        const shorter = shorterContext(messages);
+        if (shorter === messages) break;
+        messages = shorter;
+      }
+      if (estimateTokens(messages) + maxTokens > context) throw new Error('This message is too long for the local model. Try shortening it.');
       const worker = workerFor(file);
       return new Promise((resolve, reject) => {
         function finish(error, answer) {
@@ -75,8 +81,8 @@ export function browserEngine(file, onPhase = () => {}, { context = LOCAL_CONTEX
           if (data?.type === 'phase') onPhase(data.phase);
           else if (data?.type === 'text' && typeof data.text === 'string') onText(data.text.slice(0, OUTPUT_LIMIT));
           else if (data?.type === 'result') {
-            const text = data.text?.trim();
-            if (!text) { finish(new Error('The local model returned no text. Try rephrasing your message.')); return; }
+            const text = purpose === 'continue' ? data.text : data.text?.trim();
+            if (!text?.trim()) { finish(new Error('The local model returned no text. Try rephrasing your message.')); return; }
             finish(null, { text: text.slice(0, OUTPUT_LIMIT), model: file.name.replace(/\.gguf$/i, '').slice(0, 300), limited: data.limited });
           } else if (data?.type === 'error') finish(new Error(data.message));
         }
@@ -95,7 +101,7 @@ export function browserEngine(file, onPhase = () => {}, { context = LOCAL_CONTEX
         worker.addEventListener('error', broken);
         worker.addEventListener('messageerror', broken);
         signal.addEventListener('abort', stop, { once: true });
-        try { worker.postMessage({ key: keyOf(file), file, messages, maxTokens: TOKENS, context }); }
+        try { worker.postMessage({ key: keyOf(file), file, messages, maxTokens, context, code }); }
         catch { broken(); }
       });
     },
