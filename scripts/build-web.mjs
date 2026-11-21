@@ -5,6 +5,8 @@ const root = new URL('../', import.meta.url);
 const at = (path) => fileURLToPath(new URL(path, root));
 const packages = 'node_modules/';
 const assets = [
+  ['@mlc-ai/web-llm/lib/index.js', 'vendor/webllm.mjs'],
+  ['@mlc-ai/web-llm/LICENSE', 'licenses/webllm.txt'],
   ['@wllama/wllama/esm/index.js', 'vendor/wllama.mjs'],
   ['@wllama/wllama/esm/wasm/wllama.wasm', 'vendor/wllama.wasm'],
   ['@wllama/wllama/LICENCE', 'licenses/wllama.txt'],

@@ -177,7 +177,7 @@ export function conversationContext(chat, engine) {
     // Never send turns made with a local model to the community provider. The
     // other way round is safe: a model running in this browser may read turns
     // the browser already holds, so switching engines does not lose the thread.
-    const readable = assistant?.engine === engine || (engine === 'local' && assistant?.engine === 'community');
+    const readable = assistant?.engine === engine || (engine !== 'community' && Boolean(assistant?.engine));
     if (user?.role !== 'user' || !readable) continue;
     if (assistant.status === 'complete' && assistant.text) {
       // A reply can carry a short summary for the conversation while the page
@@ -481,7 +481,7 @@ export async function answerChat({ messages, generate, signal, deep = false, mod
 
 const isText = (value, max) => typeof value === 'string' && value.length <= max;
 const isDate = (value) => Number.isFinite(value) && value >= 0 && value <= 8.64e15;
-const isEngine = (value) => value === 'community' || value === 'local';
+const isEngine = (value) => ['community', 'local', 'webllm', 'chrome'].includes(value);
 const isStatus = (value) => ['pending', 'complete', 'stopped', 'error'].includes(value);
 
 function validChat(item) {

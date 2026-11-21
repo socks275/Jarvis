@@ -8,7 +8,7 @@
   <!-- YouTube refuses to play an embed that arrives without a referrer
        (error 153), so state the policy here instead of inheriting one. -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co https://raw.githubusercontent.com https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
@@ -186,6 +186,8 @@
       <legend>AI connection</legend>
       <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
       <label class="engine-option"><input type="radio" name="engine" value="local" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>On-device</strong><small>Use a GGUF model file</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
+      <label class="engine-option"><input type="radio" name="engine" value="webllm" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>WebLLM</strong><small>GPU-powered local models</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
+      <label class="engine-option"><input type="radio" name="engine" value="chrome" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>Chrome Built-in AI</strong><small>Chrome's on-device model</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
     </fieldset>
     <div class="settings-box" id="answering-settings">
       <div class="settings-switch">
@@ -204,6 +206,20 @@
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
+    </div>
+    <div class="settings-box" id="webllm-settings" hidden>
+      <p>WebLLM runs one model on your device with WebGPU. The first reply downloads several gigabytes from Hugging Face and MLC; allow time and storage. Later replies can use the browser cache. Model downloads contact those hosts, but chat prompts run locally.</p>
+      <label class="text-label" for="webllm-model">Model</label>
+      <select class="text-field" id="webllm-model">
+        <option value="Qwen2.5-1.5B-Instruct-q4f32_1-MLC">Qwen2.5 1.5B (smaller)</option>
+        <option value="Qwen2.5-3B-Instruct-q4f32_1-MLC">Qwen2.5 3B (more capable)</option>
+        <option value="Llama-3.2-3B-Instruct-q4f32_1-MLC">Llama 3.2 3B</option>
+      </select>
+      <p id="webllm-status" class="fine-print" role="status">Requires WebGPU and enough GPU memory. Larger models may not fit your device.</p>
+    </div>
+    <div class="settings-box" id="chrome-settings" hidden>
+      <p>Uses Chrome’s experimental on-device Prompt API (Gemini Nano). Availability depends on Chrome, device resources, language and browser settings. Chrome may need to download its model first. No model choice is provided by Chrome.</p>
+      <p class="fine-print">If unavailable, try another engine; selecting this option does not enable Chrome’s API.</p>
     </div>
     <div class="settings-box" id="local-settings" hidden>
       <p>Only on-device chat needs a download. Your model and on-device messages stay in this browser. Select the file again after reloading the page.</p>

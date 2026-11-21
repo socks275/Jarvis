@@ -7,10 +7,10 @@
 // WebAssembly model library never change between builds, so they are served
 // from the cache and refreshed in the background.
 
-const VERSION = 'chorus-v1';
+const VERSION = 'chorus-v2';
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './chat.mjs', './community.mjs', './connectors.mjs',
-  './engine.mjs', './format.mjs', './game.mjs', './gguf.mjs', './oauth.mjs', './read.mjs', './youtube.mjs',
+  './engine.mjs', './accelerated.mjs', './webllm.worker.mjs', './vendor/webllm.mjs', './format.mjs', './game.mjs', './gguf.mjs', './oauth.mjs', './read.mjs', './youtube.mjs',
   './favicon.svg', './manifest.webmanifest', './glass-spark-small.webp', './glass-spark.webp',
   './fonts/manrope.woff2', './fonts/instrument-serif-italic.woff2', './fonts/jetbrains-mono.woff2',
 ];

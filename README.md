@@ -210,6 +210,12 @@ npm run build
 
 Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) on its free plan. For Git-connected hosting, use `npm run build` for the build command and `dist` for the output directory. The host must serve `.mjs` as JavaScript and `.wasm` as `application/wasm`. There is no inference backend to deploy. Community mode requires browser access to `https://oai.aihorde.net`. The build bundles fonts, the local runtime, Markdown rendering and license notices, but no model weights.
 
+### On-device engines
+
+In Settings, choose **WebLLM** to run a Qwen or Llama model with WebGPU. The first use downloads model weights (several GB) from Hugging Face and MLC and caches them in the browser; it can take a while and requires sufficient GPU memory. The chat itself runs locally. Choose a smaller model if the larger one does not fit. WebGPU requires a compatible browser and device. Model quality and speed vary by model and hardware.
+
+**Chrome Built-in AI** uses Chrome's experimental Prompt API and its browser-managed model. It requires a supported Chrome version and device, and Chrome may need to download the model or enable the API. It is not available in every browser or language. Neither local engine uses the community team; each reply uses one on-device model. Local chat history is not sent to Community AI when you switch engines. Linked-page reading and connectors, if used, still contact their respective services.
+
 ### Custom domain (only once DNS answers)
 
 The site is published at **https://socks275.github.io/Jarvis/** by default, and a custom domain is opt-in because of one sharp edge: a `CNAME` file in the published artifact **sets the GitHub Pages custom domain immediately**, whether or not the DNS record exists. Publish it too early and GitHub redirects the working `socks275.github.io` URL to a domain that still points somewhere else — the site appears to go down.
