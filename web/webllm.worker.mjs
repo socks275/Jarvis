@@ -15,6 +15,6 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ type: 'text', text });
     }
     if (!text.trim()) throw new Error('The model returned no text.');
-    self.postMessage({ type: 'result', text: text.trim(), limited: finish === 'length' });
+    self.postMessage({ type: 'result', text: data.preserveWhitespace ? text : text.trim(), limited: finish === 'length' });
   } catch (error) { self.postMessage({ type: 'error', message: String(error?.message || error) }); }
 };

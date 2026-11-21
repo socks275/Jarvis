@@ -36,3 +36,13 @@ test('new local engines see prior turns but community does not receive local his
   assert.ok(conversationContext(chat, 'chrome').some(m => m.content === 'private'));
   assert.ok(!conversationContext(chat, 'community').some(m => m.content === 'private'));
 });
+
+test('WebLLM coder choices are present in the bundled MLC model catalog', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const catalog = await readFile(new URL('../node_modules/@mlc-ai/web-llm/lib/index.js', import.meta.url), 'utf8');
+  for (const size of ['1.5B', '3B', '7B']) {
+    const id = `Qwen2.5-Coder-${size}-Instruct-q4f32_1-MLC`;
+    assert.ok(WEBLLM_MODELS.includes(id));
+    assert.ok(catalog.includes(`model_id: "${id}"`));
+  }
+});

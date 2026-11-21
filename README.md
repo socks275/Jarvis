@@ -37,8 +37,8 @@ A browser cannot read another site's HTML directly, so this goes through the rel
 
 Code is not a side case. A message that is about code — a language, a library, a bug, a stack trace, a fenced block, or a follow-up in a conversation that was already about code — takes the full three-model panel and gets the code rules:
 
-- **The right models.** AI Horde's roster is ranked by capacity, so a coding task reorders it: models whose names say they were trained for code (Qwen, DeepSeek, Codestral, StarCoder and similar) are offered first, and the roomier contexts break the tie. Capacity still decides among equals, so a busy coder does not win over an idle one.
-- **Written, not improvised.** Sampling temperature drops from 0.55 to 0.2 for code, which is the difference between inventing an API and recalling the real one.
+- **The right models.** AI Horde's roster is ranked by capacity, so a coding task reorders it: when the live roster has compatible Qwen3-Coder or Devstral 2 models, Chorus sends only those preferred candidates (the provider may pick any model on that list). Otherwise it falls back to other coding-labelled models, then general models. This is a name-based heuristic, not a quality guarantee; the models may be offline or busy. Explicit model pins and bans still apply, and team passes prefer different models when available.
+- **Written, not improvised.** Sampling temperature drops from 0.55 to 0.2 for code, which can make output less variable but does not guarantee correct APIs.
 - **Complete or nothing.** The instructions ask for every import and dependency, no placeholders and no invented functions or flags, the language and versions the user named, the edge cases that actually happen, and the assumptions that had to be made. If an API may have changed, the model is told to say what it is unsure about rather than guess.
 - **A reviewer that looks for breakage.** The checking model is asked specifically for bugs, wrong or invented APIs, missing imports, unhandled edge cases, off-by-one and null mistakes, and anything that would fail to compile or run. The final model then fixes each one and returns runnable code.
 - **Room to finish.** Answers are continued pass after pass until the model stops of their own accord, so a long function is not left mid-line.
@@ -84,7 +84,7 @@ Three details worth knowing:
 - **Export it.** In **Chat options**: **Download .md** (readable, with the model named under each reply), **Download .json** (the whole chat, for processing), or **Copy as Markdown**.
 - **Pin a chat.** Pinned chats stay at the top of the sidebar and survive trimming, so the ones you return to are always where you left them.
 - **Drafts survive a reload.** A half-written message is kept in this browser per chat, including the new-chat box.
-- **Character budget.** Past 3,000 characters a counter appears under the composer, so the 4,000-character limit never arrives as a surprise.
+- **Character budget.** Past 3,000 characters a counter appears under the composer. Messages can be up to 12,000 characters, but individual models may have smaller context limits; shorten the message if it does not fit.
 
 ## Keyboard shortcuts
 
@@ -212,7 +212,7 @@ Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct U
 
 ### On-device engines
 
-In Settings, choose **WebLLM** to run a Qwen or Llama model with WebGPU. The first use downloads model weights (several GB) from Hugging Face and MLC and caches them in the browser; it can take a while and requires sufficient GPU memory. The chat itself runs locally. Choose a smaller model if the larger one does not fit. WebGPU requires a compatible browser and device. Model quality and speed vary by model and hardware.
+In Settings, choose **WebLLM** to run a Qwen, Qwen2.5 Coder or Llama model with WebGPU. For coding, try a Coder model; the 7B version needs roughly 5.9 GB of GPU memory and may not fit on every device. The first use downloads model weights (several GB) from Hugging Face and MLC and caches them in the browser; it can take a while and requires sufficient GPU memory. The chat itself runs locally. Choose a smaller model if the larger one does not fit. WebGPU requires a compatible browser and device. Model quality and speed vary by model and hardware.
 
 **Chrome Built-in AI** uses Chrome's experimental Prompt API and its browser-managed model. It requires a supported Chrome version and device, and Chrome may need to download the model or enable the API. It is not available in every browser or language. Neither local engine uses the community team; each reply uses one on-device model. Local chat history is not sent to Community AI when you switch engines. Linked-page reading and connectors, if used, still contact their respective services.
 

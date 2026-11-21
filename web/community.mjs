@@ -65,17 +65,17 @@ function queueInfo(line) {
   };
 }
 
-function reply(text, model, finish) {
+function reply(text, model, finish, preserveWhitespace = false) {
   if (finish === 'content_filter') throw new CommunityError('The provider did not return a reply for this message.');
   if (typeof text !== 'string' || !text.trim()) throw new CommunityError('The online model returned no text. Try again or rephrase your message.');
   return {
-    text: text.trim().slice(0, OUTPUT_LIMIT),
+    text: (preserveWhitespace ? text : text.trim()).slice(0, OUTPUT_LIMIT),
     ...(typeof model === 'string' && model.trim() ? { model: model.trim().slice(0, 300) } : {}),
     limited: finish === 'length' || text.length > OUTPUT_LIMIT,
   };
 }
 
-async function streamReply(response, signal, onText, onQueue) {
+async function streamReply(response, signal, onText, onQueue, preserveWhitespace = false) {
   const interrupted = () => new CommunityError('The online reply was interrupted before it finished. Try again in a moment.');
   if (!response.body) throw interrupted();
   const reader = response.body.getReader();
@@ -141,7 +141,7 @@ async function streamReply(response, signal, onText, onQueue) {
     // complete. Some releases close the body after the finish_reason and never
     // send [DONE]; a finished reply is not an interrupted one.
     if (!done && !finish) throw interrupted();
-    return reply(text, model, capped ? 'length' : finish);
+    return reply(text, model, capped ? 'length' : finish, preserveWhitespace);
   } finally {
     // Close the body when a stream ends early or the user stops it.
     reader.cancel().catch(() => {});
@@ -149,7 +149,7 @@ async function streamReply(response, signal, onText, onQueue) {
   }
 }
 
-async function request(path, { fetchImpl, signal, body, timeout, onText = () => {}, onQueue = () => {} }) {
+async function request(path, { fetchImpl, signal, body, timeout, onText = () => {}, onQueue = () => {}, preserveWhitespace = false }) {
   signal?.throwIfAborted();
   const connection = new AbortController();
   const stop = () => connection.abort(signal.reason);
@@ -164,7 +164,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
       cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: connection.signal,
     });
     if (response.ok && body && response.headers.get('Content-Type')?.includes('text/event-stream')) {
-      return await streamReply(response, connection.signal, onText, onQueue);
+      return await streamReply(response, connection.signal, onText, onQueue, preserveWhitespace);
     }
     const data = await response.json().catch(() => null);
     connection.signal.throwIfAborted();
@@ -172,7 +172,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
     if (!data || typeof data !== 'object') throw new CommunityError('AI Horde returned an unreadable response. Please try again.');
     if (body) {
       const choice = data.choices?.[0];
-      return reply(choice?.message?.content, data.model, choice?.finish_reason);
+      return reply(choice?.message?.content, data.model, choice?.finish_reason, preserveWhitespace);
     }
     return data;
   } catch (error) {
@@ -205,10 +205,12 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
   return [...models.values()].sort((a, b) => (a.queue / a.count - b.queue / b.count) || b.count - a.count || a.id.localeCompare(b.id));
 }
 
-// Model names that say "trained on code". A coding task gives them the first
-// slot; capacity still decides among equals, so a busy coder does not win.
-const CODE_MODEL = /(?:coder|codestral|codeqwen|starcoder|codegen|devstral|deepseek|qwen|code-?llama|gemma-?code)/i;
-const codeFit = (model) => (CODE_MODEL.test(model.id) ? 1 : 0);
+// Names are only a heuristic, not an evaluation of actual model quality.
+// Prefer recent coding families when they are really present in the live roster.
+const CODE_MODEL = /(?:coder|codestral|codeqwen|starcoder|codegen|devstral|deepseek[-_/ ]?code|code-?llama|gemma-?code)/i;
+const RECENT_CODE_MODEL = /(?:qwen3[._-]?coder|devstral(?:[-_ ]?(?:small|medium))?(?:[-_ ]?2)(?![0-9]))/i;
+const NON_CHAT_VARIANT = /(?:^|[-_/])(base|embedding|embed|reranker|reward)(?:$|[-_/.])/i;
+const codeFit = (model) => NON_CHAT_VARIANT.test(model.id) ? 0 : RECENT_CODE_MODEL.test(model.id) ? 2 : CODE_MODEL.test(model.id) ? 1 : 0;
 
 // The size in the name is the only quality signal the roster gives us: an idle
 // 7B model is not the model to finish a hard answer with if a 70B is reachable.
@@ -264,22 +266,37 @@ export function describeWait({ seconds, models } = {}) {
   return `${models} ${models === 1 ? 'model' : 'models'} online · ${when}`;
 }
 
-export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [] } = {}) {
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [], excluded = [] } = {}) {
   const bannedIds = [].concat(banned ?? []);
   if (bannedIds.length) models = models.filter((m) => !bannedIds.includes(m.id));
   if (!models.length) throw new CommunityError(bannedIds.length
     ? 'Every model that can answer here is on your never-use list. Clear it in Settings → Models.'
     : 'No text models are online in the community pool. Try again later.');
-  const desired = purpose === 'review' ? 352 : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
+  if (excluded.length) models = models.filter((m) => !excluded.includes(m.id));
+  if (!models.length) throw new CommunityError('No other compatible model is online right now. Try again later.');
+  const desired = purpose === 'review' ? (code ? 512 : 352) : purpose === 'triage' ? TRIAGE_TOKENS : ANSWER_TOKENS;
   let reduced;
-  for (let context = messages; ; context = shorterContext(context)) {
+  for (let context = messages; ;) {
     const input = estimateTokens(context);
     const fitting = models.map((m) => ({ ...m, room: Math.floor(Math.min(desired, m.tokens, m.context - input)) }))
       .filter((m) => m.room >= MIN_TOKENS);
     const full = fitting.filter((m) => m.room >= desired);
+    // Prefer a recent coder with a usable output budget over a general model
+    // with a larger budget. Keep the whole current context and honour pin and
+    // diversity preferences before making this trade-off.
+    if (code) {
+      const adequate = fitting.filter((m) => m.room >= Math.min(desired, FREE_TOKENS));
+      const avoid = preferOtherThan ? [].concat(preferOtherThan) : [];
+      const others = adequate.filter((m) => !avoid.includes(m.id));
+      const pool = others.length ? others : adequate;
+      const hasPin = purpose !== 'triage' && pinned && !avoid.includes(pinned) && pool.some((m) => m.id === pinned);
+      if (hasPin || pool.some((m) => codeFit(m) === 2)) return body(pool, context);
+    }
     if (full.length) return body(full, context);
     if (fitting.length && !reduced) reduced = body(fitting, context);
-    if (context.length <= 2) break;
+    const shorter = shorterContext(context);
+    if (shorter === context) break;
+    context = shorter;
   }
   if (reduced) return reduced;
   throw new CommunityError('The models online right now cannot fit this message. Try shortening it or start a new chat.');
@@ -302,7 +319,11 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     const pin = purpose !== 'triage' && pinned && !avoid.includes(pinned)
       ? ordered.find((m) => m.id === pinned) : undefined;
     const lineup = pin ? [pin, ...ordered.filter((m) => m !== pin)] : ordered;
-    const candidates = lineup.slice(0, MAX_CANDIDATES);
+    // The API may pick ANY supplied model; merely sorting a mixed list does not
+    // select the better family. Constrain the list to the best available tier.
+    // An explicit pin still wins, and other passes can choose a different model.
+    const bestTier = code && !pin ? codeFit(lineup[0]) : 0;
+    const candidates = (bestTier ? lineup.filter((m) => codeFit(m) === bestTier) : lineup).slice(0, MAX_CANDIDATES);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
       max_tokens: Math.min(...candidates.map(({ room }) => room)),
@@ -322,20 +343,20 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
   let rosterAt = 0;
   return {
     async generate({ messages, signal, purpose, preferOtherThan, onText, code = false }) {
-      const plan = async ({ fresh = false } = {}) => {
+      const plan = async ({ fresh = false, excluded = [] } = {}) => {
         if (fresh || !roster || Date.now() - rosterAt > ROSTER_TTL) {
           onPhase('finding');
           roster = await getOnlineModels({ signal, fetchImpl });
           rosterAt = Date.now();
         }
         onModels(roster);
-        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned });
+        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned, excluded });
       };
       const complete = async (body) => {
         onPhase('waiting');
         const timeout = purpose === 'triage' ? TRIAGE_TIMEOUT : RESPONSE_TIMEOUT;
         const send = (size) => request('/chat/completions', { body: { ...body, max_tokens: size }, fetchImpl, signal, timeout,
-          onText, onQueue: (queue) => onPhase('waiting', queue) });
+          onText, preserveWhitespace: purpose === 'continue', onQueue: (queue) => onPhase('waiting', queue) });
         try {
           return await send(body.max_tokens);
         } catch (error) {
@@ -351,7 +372,17 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
           if (!error.refresh) throw error;
           // The roster changed under us: look again rather than reusing it.
           const next = await plan({ fresh: true });
-          if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) throw error;
+          if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) {
+            // The roster can lag an explicit pre-queue unknown-model refusal.
+            // For coding only, try the remaining live roster once. Never do this
+            // on timeouts, disconnects, rate limits, or an ambiguous stream.
+            if (!code) throw error;
+            try { return await complete(await plan({ excluded: first.models })); }
+            catch (fallbackError) {
+              if (fallbackError.message === 'No other compatible model is online right now. Try again later.') throw error;
+              throw fallbackError;
+            }
+          }
           return await complete(next);
         }
       } catch (error) {

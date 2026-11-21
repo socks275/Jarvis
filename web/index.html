@@ -115,7 +115,7 @@
               <div class="edit-banner" id="edit-banner" hidden><span>Editing an earlier message — sending replaces it and everything after.</span><button type="button" class="text-action" id="cancel-edit">Cancel</button></div>
               <div class="composer-box">
                 <label for="prompt" class="sr-only">Message Chorus</label>
-                <textarea id="prompt" rows="1" maxlength="4000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
+                <textarea id="prompt" rows="1" maxlength="12000" placeholder="Ask Chorus anything…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
                 <div class="composer-controls">
                   <button type="button" class="deep-button direct-chip" id="direct-chip" hidden aria-pressed="false" title="Uncensored mode is on: replies are asked to answer without hedging. Click to open Settings."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Uncensored</button>
                   <button type="button" class="deep-button" id="deep-button" aria-pressed="false" title="Use the full three-model team even for a short question. This can take longer."><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg> Think deeper</button>
@@ -202,7 +202,7 @@
 <p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
       <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
-      <p>One model reads each message first and decides how many models should answer: one for small talk, two for a question, three for code or tricky work. The reply names the model that decided and the models that answered.</p>
+      <p>One model helps decide how many models should answer. Coding conversations use a three-pass draft, review and final by available models even if the vote suggests fewer; if there aren’t enough distinct models the same one may be reused. The reply names the models involved. For coding, Chorus prefers compatible Qwen3-Coder or Devstral 2 models when the community has them online, and otherwise uses other available models; availability and quality vary.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
@@ -211,6 +211,9 @@
       <p>WebLLM runs one model on your device with WebGPU. The first reply downloads several gigabytes from Hugging Face and MLC; allow time and storage. Later replies can use the browser cache. Model downloads contact those hosts, but chat prompts run locally.</p>
       <label class="text-label" for="webllm-model">Model</label>
       <select class="text-field" id="webllm-model">
+        <option value="Qwen2.5-Coder-1.5B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 1.5B (~1.9 GB GPU memory)</option>
+        <option value="Qwen2.5-Coder-3B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 3B (~2.9 GB GPU memory)</option>
+        <option value="Qwen2.5-Coder-7B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 7B (~5.9 GB GPU memory)</option>
         <option value="Qwen2.5-1.5B-Instruct-q4f32_1-MLC">Qwen2.5 1.5B (smaller)</option>
         <option value="Qwen2.5-3B-Instruct-q4f32_1-MLC">Qwen2.5 3B (more capable)</option>
         <option value="Llama-3.2-3B-Instruct-q4f32_1-MLC">Llama 3.2 3B</option>

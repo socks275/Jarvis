@@ -21,7 +21,7 @@ async function prepare(file, key, context) {
   loadedKey = key;
 }
 
-self.addEventListener('message', async ({ data: { key, file, messages, maxTokens, context } }) => {
+self.addEventListener('message', async ({ data: { key, file, messages, maxTokens, context, code } }) => {
   const phase = (name) => self.postMessage({ type: 'phase', phase: name });
   // One generation at a time: a second request waits for the first to finish.
   while (busy) await new Promise((done) => setTimeout(done, 50));
@@ -32,7 +32,7 @@ self.addEventListener('message', async ({ data: { key, file, messages, maxTokens
     phase('generating');
     let text = '', lastUpdate = 0, limited = false;
     await runtime.createChatCompletion({
-      messages, max_tokens: maxTokens, temperature: 0.55, top_p: 0.9, stream: true,
+      messages, max_tokens: maxTokens, temperature: code ? 0.2 : 0.55, top_p: 0.9, stream: true,
       onData(chunk) {
         const choice = chunk.choices?.[0];
         if (choice?.delta?.content) text += choice.delta.content;

@@ -335,10 +335,10 @@ test('one model decides the team size, and its verdict overrides the built-in gu
   assert.equal(result.text, 'Final');
 });
 
-test('a decider that chooses one model is taken at its word and the trail records it', async () => {
+test('a decider can choose one model for a non-coding question and the trail records it', async () => {
   const calls = [];
   const result = await answerChat({
-    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why does my npm test fail?' }],
+    messages: [{ role: 'system', content: 'test' }, { role: 'user', content: 'Why do clouds form?' }],
     signal: signal(), decide: true,
     generate: async (request) => {
       calls.push(request.purpose);
@@ -628,7 +628,7 @@ test('existing local and community answers are migrated into chats without keepi
 test('checks prompt limits independently of the textarea', () => {
   assert.equal(cleanPrompt('  hello  '), 'hello');
   assert.throws(() => cleanPrompt(' '.repeat(8)), /Enter a message/);
-  assert.throws(() => cleanPrompt('x'.repeat(4001)), /4,000/);
+  assert.throws(() => cleanPrompt('x'.repeat(12001)), /12,000/);
 });
 
 test('uncensored mode changes the instructions, per reply, and keeps the coding rules', () => {
@@ -754,4 +754,75 @@ test('pinned chats stay at the top, and notes and pins survive a reload', () => 
   const [saved] = readChats(storage);
   assert.equal(saved.pinned, true);
   assert.equal(saved.note, 'A note for the models');
+});
+
+
+test('coding and coding follow-ups keep the panel even if the vote says one', async () => {
+  for (const messages of [
+    [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Explain the Python exception' }],
+    [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a Java function' }, { role: 'assistant', content: 'a function' }, { role: 'user', content: 'now fix it' }],
+  ]) {
+    const calls = [];
+    const result = await answerChat({ messages, signal: signal(), decide: true, generate: async (r) => {
+      calls.push(r.purpose);
+      if (r.purpose === 'triage') return { text: 'one', model: 'a' };
+      if (r.purpose === 'review') return { text: 'Check the return value', model: 'b' };
+      return { text: '```java\nreturn 1;\n```', model: r.purpose === 'draft' ? 'a' : 'c' };
+    } });
+    assert.deepEqual(calls, ['triage', 'draft', 'review', 'final']);
+    assert.equal(result.team[0].pick, 'solo'); // report what was voted, not what was enforced
+  }
+});
+
+test('a code-writing final pass that drops or truncates code keeps the complete draft and warns', async () => {
+  for (const final of ['Here is what to change.', '```python\ndef f():\n    pass']) {
+    const draft = '```python\ndef f():\n    return 42\n```';
+    const result = await answerChat({ messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a Python function' }], signal: signal(), deep: true,
+      generate: async ({ purpose }) => ({ text: purpose === 'draft' ? draft : purpose === 'review' ? 'Review' : final, model: purpose }) });
+    assert.equal(result.text, draft);
+    assert.match(result.warning, /draft.*complete code block/);
+    assert.equal(result.team.at(-1).model, 'final');
+  }
+});
+
+test('recognises more programming languages without forcing code on explanations', () => {
+  assert.equal(isCodeRequest('Explain C++ templates'), true);
+  assert.equal(isCodeRequest('What is a Java compiler?'), true);
+  assert.equal(isCodeRequest('How does this app work?'), true);
+});
+
+test('code continuation preserves indentation and repairs an unclosed fence', async () => {
+  const seen = [], live = [];
+  const result = await answerChat({
+    messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write a Python function' }],
+    signal: signal(), mode: 'solo', onText: text => live.push(text),
+    generate: async (request) => {
+      seen.push(request.purpose);
+      if (request.purpose === 'answer') return { text: '```python\ndef f():\n', model: 'a' };
+      request.onText?.('    return 42\n```');
+      return { text: '    return 42\n```', model: 'a' };
+    },
+  });
+  assert.deepEqual(seen, ['answer', 'continue']);
+  assert.equal(result.text, '```python\ndef f():\n    return 42\n```');
+  assert.equal(live.at(-1), result.text);
+  assert.equal(result.limited, undefined);
+});
+
+test('an unclosed code fence that cannot be finished is marked incomplete', async () => {
+  const result = await answerChat({ messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'Write Python code' }], signal: signal(), mode: 'solo',
+    generate: async ({ purpose }) => { if (purpose === 'continue') throw new Error('offline'); return { text: '```python\nprint(', model: 'a' }; },
+  });
+  assert.equal(result.limited, true);
+  assert.equal(result.text, '```python\nprint(');
+});
+
+test('long code messages fit the composer limit and survive saved chat reload', () => {
+  const storage = fakeStorage(), source = 'def f():\n' + '    pass\n'.repeat(800);
+  assert.ok(source.length > 4000);
+  assert.equal(cleanPrompt(source), source.trim());
+  const chat = createChat('code');
+  const reply = newTurn(chat, cleanPrompt(source), 'community'); reply.status = 'complete'; reply.text = 'done';
+  assert.equal(saveChats(storage, [chat]), true);
+  assert.equal(readChats(storage)[0].messages[0].text, source.trim());
 });
