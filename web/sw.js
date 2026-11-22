@@ -3,14 +3,13 @@
 // The app is a handful of modules and two fonts, so it is cached whole: after
 // the first visit it opens without a network. Pages and scripts are fetched
 // first and fall back to the cache, so a deploy is picked up on the next load
-// rather than being stuck behind a stale copy. Fonts, the WASM runtime and the
-// WebAssembly model library never change between builds, so they are served
+// rather than being stuck behind a stale copy. Fonts and artwork are served
 // from the cache and refreshed in the background.
 
-const VERSION = 'chorus-v2';
+const VERSION = 'chorus-v3';
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './chat.mjs', './community.mjs', './connectors.mjs',
-  './engine.mjs', './accelerated.mjs', './webllm.worker.mjs', './vendor/webllm.mjs', './format.mjs', './game.mjs', './gguf.mjs', './oauth.mjs', './read.mjs', './youtube.mjs',
+  './format.mjs', './game.mjs', './oauth.mjs', './read.mjs', './youtube.mjs',
   './favicon.svg', './manifest.webmanifest', './glass-spark-small.webp', './glass-spark.webp',
   './fonts/manrope.woff2', './fonts/instrument-serif-italic.woff2', './fonts/jetbrains-mono.woff2',
 ];
@@ -28,7 +27,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
-    await Promise.all(names.filter((name) => name !== VERSION).map((name) => caches.delete(name)));
+    await Promise.all(names.filter((name) => /^chorus-v\d+$/.test(name) && name !== VERSION).map((name) => caches.delete(name)));
     await self.clients.claim();
   })());
 });

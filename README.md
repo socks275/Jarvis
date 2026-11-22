@@ -13,7 +13,7 @@ npm start
 
 Open `http://localhost:3000`, type a message, and press **Enter** or the send arrow. Press **Shift+Enter** for a new line. On your first community message, review the privacy notice and choose **Accept and send**. **New chat** starts a fresh conversation; **Search chats** (Ctrl/Command+K) searches the titles and text of saved chats.
 
-**Community AI** is the default. It uses the [AI Horde public chat interface](https://oai.aihorde.net/docs) without a model download, account, personal API key, or payment. Chorus checks which text models are online before asking for a reply; **Settings → Check availability** checks the list without sending a message. Availability, output limits, and wait times vary, and anonymous traffic has low priority. Chorus streams provider output when it’s available and shows wait information when the service supplies it.
+**Community AI** is the default. It uses the [AI Horde public chat interface](https://oai.aihorde.net/docs) without a model download, account, personal API key, or payment. Chorus checks which eligible GPT-OSS models are online before asking for a reply; **Settings → Check availability** checks the list without sending a message. Availability, output limits, and wait times vary, and anonymous traffic has low priority. Chorus streams provider output when it’s available and shows wait information when the service supplies it.
 
 Chorus answers with a small team of models, and one model decides the size of that team. It reads your message first and replies with one word: one model for small talk such as a greeting or a quick thanks, two for a question or a request, three for coding, maths or anything risky. Once the model roster is known — after **Check availability** or the first reply — a small line under the composer estimates the wait in plain words ("12 models online · about a minute"), drawn from each model's queue and worker count. The models then work in order: one drafts, the next replies with corrections, and the last gives the finished answer — and that last pass prefers a **larger model from the roster (30B and up) whenever one is reachable**, falling back to queue order when the big models are buried. One reply looks up the model roster once and shares it across its passes, instead of asking the network for the same list three times. Each reply names the model that decided and the models that answered, so you can see who drafted, who checked and who finished. If the deciding model can’t be reached, a built-in guess keeps the reply moving. Turn on **Think deeper** to skip the vote and use the full three-model team even for a short question. That takes longer because the models work in sequence. If a later model cannot finish, Chorus shows the draft with a note. A reply that runs out of room is not left half-finished: Chorus asks the same model to carry on, pass after pass, until it stops of its own accord. Use **Stop** to cancel a reply or **Try again** to request a new answer to the most recent message. Chorus respects provider cooldowns and does not automatically resubmit an uncertain request.
 
@@ -37,7 +37,7 @@ A browser cannot read another site's HTML directly, so this goes through the rel
 
 Code is not a side case. A message that is about code — a language, a library, a bug, a stack trace, a fenced block, or a follow-up in a conversation that was already about code — takes the full three-model panel and gets the code rules:
 
-- **The right models.** AI Horde's roster is ranked by capacity, so a coding task reorders it: when the live roster has compatible Qwen3-Coder or Devstral 2 models, Chorus sends only those preferred candidates (the provider may pick any model on that list). Otherwise it falls back to other coding-labelled models, then general models. This is a name-based heuristic, not a quality guarantee; the models may be offline or busy. Explicit model pins and bans still apply, and team passes prefer different models when available.
+- **The requested models.** Chorus requests only GPT-OSS models advertised by the community network, prioritising larger available variants and using another eligible model on a definitive pre-queue model refusal. Model names are reported by volunteer workers and cannot be independently verified. Proprietary GPT and Claude are not available through an authenticated provider in this app; this is not unlimited access.
 - **Written, not improvised.** Sampling temperature drops from 0.55 to 0.2 for code, which can make output less variable but does not guarantee correct APIs.
 - **Complete or nothing.** The instructions ask for every import and dependency, no placeholders and no invented functions or flags, the language and versions the user named, the edge cases that actually happen, and the assumptions that had to be made. If an API may have changed, the model is told to say what it is unsure about rather than guess.
 - **A reviewer that looks for breakage.** The checking model is asked specifically for bugs, wrong or invented APIs, missing imports, unhandled edge cases, off-by-one and null mistakes, and anything that would fail to compile or run. The final model then fixes each one and returns runnable code.
@@ -70,11 +70,11 @@ Free community models are not always cooperative. Two things keep a reply from e
 
 ## Uncensored mode
 
-Settings → **Uncensored mode** swaps the instructions Chorus sends for a plainer set: answer what was asked, in full, with **no lecture, no disclaimer, no moral verdict** and no suggestion to ask for something else. Fiction is answered as fiction, history as history, criticism as criticism — a request framed as invented or academic is not refused as if it were a plan. Blunt or crude wording is matched rather than corrected. It applies to **both** the community models and your on-device model.
+Settings → **Uncensored mode** swaps the instructions Chorus sends for a plainer set: answer what was asked, in full, with **no lecture, no disclaimer, no moral verdict** and no suggestion to ask for something else. Fiction is answered as fiction, history as history, criticism as criticism — a request framed as invented or academic is not refused as if it were a plan. Blunt or crude wording is matched rather than corrected. It applies to Community AI replies.
 
 Three details worth knowing:
 
-- **It changes the prompt, not the model.** Chorus cannot un-train a model; it can only ask differently. When a model still declines, the mode gets **one extra retry**, phrased with no room left for an apology and pointed at a different model. If every model declines even then, the reply says so plainly — *that is those models' limit rather than how the request was worded* — and suggests **Try again** for a different set or On-device with a model you pick. It never invents an answer to cover for a refusal.
+- **It changes the prompt, not the model.** Chorus cannot un-train a model; it can only ask differently. When a model still declines, the mode gets **one extra retry**, phrased with no room left for an apology and pointed at a different model. If every model declines even then, the reply says so plainly — *that is those models' limit rather than how the request was worded* — and suggests **Try again** for a different set of available models. It never invents an answer to cover for a refusal.
 - **It is per reply, and off by default.** The switch is saved in this browser, the replies you start while it is on are labelled **Uncensored**, and turning it off does not rewrite a reply you already have. **Try again** uses the mode as it is set *now*, which is the quickest way to give a refused answer a second chance.
 - **Only the instructions change.** Your messages go to the same models, your chats stay in the same place, and everything under **Privacy and history** is unchanged.
 
@@ -190,16 +190,7 @@ Community AI sends your message and recent relevant turns from the same chat to 
 
 Chorus keeps recent chats in local browser storage when available; they are not encrypted or account-synced. Delete a chat with the trash button beside it in the sidebar, from **Chat options**, or remove everything with **Settings → Clear all chats**. Deleting them locally does not remove data already sent to a provider. Each reply uses a full-text window of the seven most recent turns, and **older turns are condensed into one short line each** rather than dropped, so a long conversation keeps its thread. Every model in a team reads that window, not only the draft it is handed. A question stays in that window even when its own reply was stopped or failed, so a follow-up such as “which one did you pick?” still has the question to refer to. Start a new chat for a different subject. Existing Chorus runs with usable answers are imported as individual chats.
 
-### Optional: chat on-device
-
-For work that shouldn’t leave your computer, choose **Settings → On-device** in a current desktop Chrome or Edge browser and select a single `.gguf` file. The local model and on-device conversation turns are never sent to AI Horde. Reselect the file after reloading the page.
-
-- [Qwen2.5 0.5B Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true) — 491 MB.
-- [SmolLM2 360M Instruct](https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf) — 271 MB, a smaller option.
-
-Chorus reads the context window from the file's own GGUF metadata and asks for it, capped by what the machine can hold (about 4k on a small laptop, up to 16k with 8 GB or more) — a model trained on 32k is no longer used at a flat 4k. **Settings** shows which window you got and why. The model also stays loaded between replies, so a follow-up does not pay the loading cost again; stopping a reply unloads it, because a warm model cannot be interrupted.
-
-Local models run with [wllama](https://github.com/ngxson/wllama) and WebAssembly on your CPU. Larger models may be slow or exceed browser memory. If the embedded preview limits workers, open the preview in its own tab.
+Chats from previously supported local models remain readable, but their turns are not sent to Community AI. Previously downloaded model caches are not automatically deleted; you can remove them via your browser’s site-data settings.
 
 ## Publish for free
 
@@ -208,13 +199,7 @@ npm ci
 npm run build
 ```
 
-Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) on its free plan. For Git-connected hosting, use `npm run build` for the build command and `dist` for the output directory. The host must serve `.mjs` as JavaScript and `.wasm` as `application/wasm`. There is no inference backend to deploy. Community mode requires browser access to `https://oai.aihorde.net`. The build bundles fonts, the local runtime, Markdown rendering and license notices, but no model weights.
-
-### On-device engines
-
-In Settings, choose **WebLLM** to run a Qwen, Qwen2.5 Coder or Llama model with WebGPU. For coding, try a Coder model; the 7B version needs roughly 5.9 GB of GPU memory and may not fit on every device. The first use downloads model weights (several GB) from Hugging Face and MLC and caches them in the browser; it can take a while and requires sufficient GPU memory. The chat itself runs locally. Choose a smaller model if the larger one does not fit. WebGPU requires a compatible browser and device. Model quality and speed vary by model and hardware.
-
-**Chrome Built-in AI** uses Chrome's experimental Prompt API and its browser-managed model. It requires a supported Chrome version and device, and Chrome may need to download the model or enable the API. It is not available in every browser or language. Neither local engine uses the community team; each reply uses one on-device model. Local chat history is not sent to Community AI when you switch engines. Linked-page reading and connectors, if used, still contact their respective services.
+Upload **`dist/` only** to a static host, for example [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) on its free plan. For Git-connected hosting, use `npm run build` for the build command and `dist` for the output directory. The host must serve `.mjs` as JavaScript. There is no inference backend to deploy. Community mode requires browser access to `https://oai.aihorde.net`. The build bundles fonts, Markdown rendering and license notices; no model runtime or weights are included.
 
 ### Custom domain (only once DNS answers)
 

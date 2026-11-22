@@ -306,7 +306,7 @@ async function answerFully({ generate, request, signal, onText = () => {}, round
 // What the reader sees when every model in the pool declined.
 const DECLINED = 'None of the models online would take this one on. Try asking it another way — rephrasing usually gets through — or turn on Think deeper for the full panel.';
 // The same news in uncensored mode: the limits are the models', not the wording.
-const DECLINED_DIRECT = 'Every model online declined this one, even asked plainly. That is those models’ own limit rather than how the request was worded: choose Try again for a different set, or switch to On-device with a model you pick.';
+const DECLINED_DIRECT = 'Every model online declined this one, even asked plainly. That is those models’ own limit rather than how the request was worded: choose Try again for a different set of available models.';
 
 /**
  * Asks for a real answer. A refusal is not an answer: it is retried with a
