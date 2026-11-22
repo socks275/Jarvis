@@ -668,7 +668,7 @@ test('a refusal in uncensored mode is asked again once more, then reported as th
   // Every model that declined is avoided on the next attempt.
   assert.deepEqual(seen[3].preferOtherThan, ['model-1', 'model-2', 'model-3']);
   assert.match(result.text, /Every model online declined this one/);
-  assert.match(result.text, /On-device/);
+  assert.match(result.text, /Try again/);
 });
 
 test('a saved reply keeps the mode it was written in', () => {
@@ -825,4 +825,19 @@ test('long code messages fit the composer limit and survive saved chat reload', 
   const reply = newTurn(chat, cleanPrompt(source), 'community'); reply.status = 'complete'; reply.text = 'done';
   assert.equal(saveChats(storage, [chat]), true);
   assert.equal(readChats(storage)[0].messages[0].text, source.trim());
+});
+
+test('legacy local, WebLLM, and Chrome chats stay saved and never enter community context', () => {
+  const storage = fakeStorage();
+  const chat = createChat('Legacy history');
+  for (const engine of ['local', 'webllm', 'chrome']) turn(chat, `secret ${engine} question`, `secret ${engine} answer`, engine);
+  turn(chat, 'community question', 'community answer');
+  newTurn(chat, 'new community request', 'community');
+  assert.equal(saveChats(storage, [chat]), true);
+  const restored = readChats(storage)[0];
+  assert.equal(restored.messages.filter(m => m.role === 'assistant' && m.engine !== 'community').length, 3);
+  const context = JSON.stringify(conversationContext(restored, 'community'));
+  for (const engine of ['local', 'webllm', 'chrome']) assert.doesNotMatch(context, new RegExp(`secret ${engine}`));
+  assert.match(context, /community question/);
+  assert.match(context, /new community request/);
 });

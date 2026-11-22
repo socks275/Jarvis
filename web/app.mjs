@@ -1,9 +1,7 @@
 import MarkdownIt from './vendor/markdown-it.mjs';
 import { createFormatter } from './format.mjs';
 import { answerChat, chatToJson, chatToMarkdown, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, PROMPT_LIMIT, readChats, rewindTo, saveChats } from './chat.mjs';
-import { communityEngine, describeWait, getOnlineModels, waitEstimate } from './community.mjs';
-import { webLLMEngine, chromeAIEngine, disposeWebLLM } from './accelerated.mjs';
-import { browserEngine, contextWindow, disposeLocal, validateModel } from './engine.mjs';
+import { communityEngine, describeWait, getEligibleOnlineModels, waitEstimate } from './community.mjs';
 import { fetchPage, findUrls, sourceContext } from './read.mjs';
 import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
 import { buildGame, gameTweak, isGameRequest, mergeGameOptions, pickTheme, themeName } from './game.mjs';
@@ -14,7 +12,6 @@ const $ = (id) => document.getElementById(id);
 const prompt = $('prompt');
 const thread = $('thread');
 const scroll = $('chat-scroll');
-const engineOptions = [...$('engine-options').querySelectorAll('input')];
 const mobile = matchMedia('(max-width: 700px)');
 const format = createFormatter(MarkdownIt);
 const date = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -83,12 +80,9 @@ let chats = readChats(storage);
 let current;
 const drafts = readDrafts();
 let active;
-let retryLater;
 let pendingNodes;
 let streamFrame = 0;
-let engine = 'community';
-let localFile;
-let validatingFile = false;
+const engine = 'community';
 let deeper = false;
 // Uncensored mode: off unless it was switched on in this browser.
 const saved = readPrefs();
@@ -97,8 +91,6 @@ let persona = saved.persona;
 let pinned = saved.pinned;
 let banned = saved.banned;
 let readRelay = saved.readRelay;
-// The window the chosen file was trained for, read from its metadata.
-let localContext;
 let eta;
 // What actually happened, newest last, so a bad reply can be explained.
 const activity = [];
@@ -246,42 +238,35 @@ function paintSearch() {
 }
 
 function paintConnection() {
-  const community = engine === 'community';
-  const label = ({ community: 'Community AI', local: 'On-device GGUF', webllm: 'WebLLM', chrome: 'Chrome Built-in AI' })[engine];
-  $('sidebar-engine').textContent = $('top-engine').textContent = label;
-  $('sidebar-engine-note').textContent = community ? 'Free · no key required' : engine === 'local' ? (localFile ? 'Model ready on this device' : 'Choose a GGUF file') : 'Runs on this device';
-  for (const id of ['sidebar-engine-icon', 'top-engine-icon']) $(id).setAttribute('href', community ? '#i-globe' : '#i-device');
+  $('sidebar-engine').textContent = $('top-engine').textContent = 'Community AI';
+  $('sidebar-engine-note').textContent = 'Free · no key required';
   paintComposer();
   paintSettings();
 }
 
-const cooling = () => engine === 'community' && retryAt > Date.now();
-const unavailable = () => engine === 'local' && !localFile;
-const blocked = () => Boolean(active || validatingFile || connectorRun || cooling() || unavailable());
+const cooling = () => retryAt > Date.now();
+const blocked = () => Boolean(active || connectorRun || cooling());
 
 function paintComposer() {
   const writing = Boolean(active && active.chat === current);
   const busyElsewhere = Boolean(active && !writing);
   const cooldown = cooling();
-  const needsFile = unavailable();
   $('send-button').hidden = writing;
   $('send-button').disabled = blocked() || !prompt.value.trim();
   $('stop-button').hidden = !writing;
-  $('deep-button').hidden = engine !== 'community';
+  $('deep-button').hidden = false;
   $('deep-button').disabled = Boolean(active);
   $('deep-button').setAttribute('aria-pressed', String(deeper));
-  const wait = engine === 'community' && !active && !cooldown ? describeWait(eta) : '';
+  const wait = !active && !cooldown ? describeWait(eta) : '';
   $('eta-note').textContent = wait;
   $('eta-note').hidden = !wait;
   $('edit-banner').hidden = !editTarget;
   $('direct-chip').hidden = !direct;
   $('direct-chip').setAttribute('aria-pressed', String(direct));
-  $('composer-status').hidden = !(busyElsewhere || cooldown || needsFile);
+  $('composer-status').hidden = !(busyElsewhere || cooldown);
   $('composer-note').textContent = busyElsewhere ? 'Chorus is replying in another chat.'
-    : cooldown ? 'The community network asked us to wait. You can send again when the cooldown ends.'
-      : needsFile ? 'Select a GGUF file to chat on-device.' : '';
+    : cooldown ? 'The community network asked us to wait. You can send again when the cooldown ends.' : '';
   $('open-busy').hidden = !busyElsewhere;
-  $('choose-model').hidden = busyElsewhere || !needsFile;
   for (const retry of thread.querySelectorAll('[data-retry]')) retry.disabled = blocked();
 }
 
@@ -313,12 +298,7 @@ function download(name, text, type) {
 const exportName = (chat, extension) => `${(chat.title || 'chorus chat').replace(/[^\w\- ]+/g, '').trim().slice(0, 50) || 'chorus-chat'}.${extension}`;
 
 function paintSettings() {
-  const locked = Boolean(active || validatingFile);
-  for (const option of engineOptions) {
-    option.checked = option.value === engine;
-    option.disabled = locked;
-  }
-  $('settings-busy').hidden = !active;
+  const locked = Boolean(active);
   $('direct-toggle').setAttribute('aria-checked', String(direct));
   $('direct-toggle').disabled = locked;
   $('direct-toggle').title = direct ? 'Turn uncensored mode off' : 'Turn uncensored mode on';
@@ -333,29 +313,15 @@ function paintSettings() {
     ? 'Pages are read only when you link them, and only through this relay.'
     : 'Deploy the relay once and paste its address here — the GitHub sign-in relay works too. Pages are read only when you link them.';
   $('activity-log').textContent = activityText();
-  $('community-settings').hidden = engine !== 'community';
-  $('local-settings').hidden = engine !== 'local';
-  $('webllm-settings').hidden = engine !== 'webllm';
-  $('chrome-settings').hidden = engine !== 'chrome';
-  $('webllm-model').disabled = locked;
   $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
     ? 'Availability hasn’t been checked yet.' : models.length
       ? `${models.length} ${models.length === 1 ? 'text model was' : 'text models were'} online at the last check.`
-      : 'No eligible text models were online at the last check.');
+      : 'No eligible GPT-OSS models were online at the last check.');
   $('online-models').replaceChildren(...(networkError ? [] : (models ?? []).slice(0, 5).map(({ id }) => el('li', '', id))));
   $('online-models').hidden = Boolean(networkError || !models?.length || statusController);
   $('check-network').disabled = Boolean(active || statusController || retryAt > Date.now());
   $('reset-permission').hidden = !communityAllowed;
   $('reset-permission').disabled = Boolean(active);
-  $('model-file').disabled = locked;
-  $('file-label').textContent = validatingFile ? 'Checking model file…' : localFile?.name ?? 'Choose a .gguf file';
-  const window_ = localFile ? contextWindow(localContext) : 0;
-  $('model-window').hidden = !localFile;
-  $('model-window').textContent = localFile
-    ? `Window: ${window_.toLocaleString('en-US')} tokens${localContext && localContext !== window_ ? ` (the file offers ${localContext.toLocaleString('en-US')}, capped for this device)` : ''}. The model stays loaded between replies.`
-    : '';
-  $('clear-model').hidden = !localFile;
-  $('clear-model').disabled = locked;
   $('clear-chats').disabled = Boolean(active || !chats.length);
 }
 
@@ -600,7 +566,6 @@ function phaseText(job) {
   switch (job?.phase) {
     case 'finding': return 'Finding an online model…';
     case 'waiting': return queueText(job) || 'Waiting for a community model…';
-    case 'loading': return 'Loading your local model…';
     case 'generating': return 'Writing a reply…';
     default: return 'Getting ready…';
   }
@@ -1254,7 +1219,6 @@ async function findVideo(reply) {
 }
 
 async function generate(chat, message) {
-  retryLater = undefined;
   statusController?.abort();
   const controller = new AbortController();
   const job = { chat, message, controller, steps: [], finalising: false, draft: '' };
@@ -1265,7 +1229,7 @@ async function generate(chat, message) {
     if (phase === 'waiting' && queue?.seconds) note('queue', `${queue.position ? `position ${queue.position}, ` : ''}${queue.seconds}s wait`);
     refreshStream(job);
   };
-  const runtime = message.engine === 'community' ? communityEngine({
+  const runtime = communityEngine({
     onPhase,
     onLimit: showCooldown,
     preference: { pinned, banned },
@@ -1276,7 +1240,7 @@ async function generate(chat, message) {
       note('roster', `${list.length} models online${pinned ? `, preferring ${pinned}` : ''}${banned.length ? `, avoiding ${banned.length}` : ''}`);
       if ($('settings-dialog').open) paintSettings();
     },
-  }) : message.engine === 'webllm' ? webLLMEngine($('webllm-model').value, onPhase, text => { $('webllm-status').textContent = text; }) : message.engine === 'chrome' ? chromeAIEngine(onPhase) : browserEngine(localFile, onPhase, { context: contextWindow(localContext) });
+  });
   chat.updatedAt = Date.now();
   save();
   paintView(true);
@@ -1284,16 +1248,15 @@ async function generate(chat, message) {
   paintSettings();
   if (!mobile.matches) prompt.focus({ preventScroll: true });
   $('announcer').textContent = 'Chorus is preparing a reply.';
-  note('ask', `${message.engine === 'community' ? 'community' : 'on-device'}${message.raw ? ' · uncensored' : ''}${persona ? ' · with your instructions' : ''}`);
+  note('ask', `community${message.raw ? ' · uncensored' : ''}${persona ? ' · with your instructions' : ''}`);
   try {
     // A link in the message is read before the models are asked, so the answer
     // can be about what the page actually says.
     await readLinkedPages(chat);
     if (controller.signal.aborted) throw controller.signal.reason;
-    // The on-device model answers alone: one local model per reply, no team.
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
-      signal: controller.signal, deep: message.deep, direct: message.raw === true, mode: message.engine !== 'community' ? 'solo' : undefined,
-      decide: message.engine === 'community',
+      signal: controller.signal, deep: message.deep, direct: message.raw === true,
+      decide: true,
       onText(text) {
         // The draft stays on screen while the final pass writes, so the answer
         // never collapses to an empty bubble and then grows back.
@@ -1333,12 +1296,7 @@ async function generate(chat, message) {
       const reason = (error instanceof Error && error.message) || 'The reply could not be completed.';
       message.status = 'error';
       message.warning = reason.slice(0, 600);
-      // Nothing arrived: one automatic second try beats handing back an error.
-      if (!message.retried) {
-        message.retried = true;
-        retryLater = { chat, message };
-      }
-      $('announcer').textContent = message.retried ? 'The reply failed; trying once more.' : 'Could not complete the reply.';
+      $('announcer').textContent = 'Could not complete the reply.';
     }
   } finally {
     if (streamFrame) cancelAnimationFrame(streamFrame);
@@ -1350,14 +1308,7 @@ async function generate(chat, message) {
     paintHistory();
     paintSettings();
     if (hadFocus) prompt.focus({ preventScroll: true });
-    if (retryLater?.message === message && current === chat) {
-      const pending = retryLater;
-      retryLater = undefined;
-      setTimeout(() => {
-        if (active || !chats.includes(pending.chat) || pending.message.status !== 'error') return;
-        generate(pending.chat, pending.message);
-      }, 900);
-    }
+
   }
 }
 
@@ -1463,7 +1414,7 @@ $('persona-input').addEventListener('input', () => {
   personaTimer = setTimeout(() => { writePrefs(); toast(persona ? 'Your instructions are saved' : 'Back to the default style'); }, 600);
 });
 $('clear-model-picks').addEventListener('click', () => {
-  if (active || validatingFile) return;
+  if (active) return;
   pinned = '';
   banned = [];
   writePrefs();
@@ -1488,7 +1439,7 @@ for (const control of document.querySelectorAll('[data-prompt]')) control.addEve
 });
 $('deep-button').addEventListener('click', () => { deeper = !deeper; paintComposer(); });
 function setDirect(next) {
-  if (active || validatingFile) return;
+  if (active) return;
   direct = next;
   writePrefs();
   paintSettings();
@@ -1496,7 +1447,7 @@ function setDirect(next) {
   toast(direct ? 'Uncensored mode on for your next replies' : 'Uncensored mode off');
 }
 $('direct-toggle').addEventListener('click', () => {
-  if (active || validatingFile) return;
+  if (active) return;
   setDirect(!direct);
 });
 // The chip is a reminder that the mode is on; the switch itself lives in Settings.
@@ -1663,22 +1614,13 @@ $('connector-list').addEventListener('click', async (event) => {
 $('scroll-latest').addEventListener('click', () => { scrollToEnd(); prompt.focus({ preventScroll: true }); });
 scroll.addEventListener('scroll', syncScroll, { passive: true });
 
-for (const option of engineOptions) option.addEventListener('change', () => {
-  if (active || validatingFile) return;
-  engine = option.value;
-  if (engine !== 'community') statusController?.abort();
-  if (engine !== 'webllm') disposeWebLLM();
-  paintConnection();
-  paintThread();
-});
-$('webllm-model').addEventListener('change', () => { disposeWebLLM(); $('webllm-status').textContent = 'The selected model will download when you send a message.'; });
 $('check-network').addEventListener('click', async () => {
   if (active || statusController || retryAt > Date.now()) return;
   const check = new AbortController();
   statusController = check;
   networkError = '';
   paintSettings();
-  try { models = await getOnlineModels({ signal: check.signal }); }
+  try { models = await getEligibleOnlineModels({ signal: check.signal }); }
   catch (error) {
     if (!check.signal.aborted) {
       networkError = error.message;
@@ -1689,36 +1631,6 @@ $('check-network').addEventListener('click', async () => {
     paintSettings();
   }
 });
-$('model-file').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file || active || validatingFile) return;
-  validatingFile = true;
-  paintComposer();
-  $('model-error').hidden = true;
-  paintSettings();
-  try {
-    const checked = await validateModel(file);
-    localFile = file;
-    localContext = checked?.context;
-  }
-  catch (error) {
-    $('model-error').textContent = error.message;
-    $('model-error').hidden = false;
-  } finally {
-    validatingFile = false;
-    paintConnection();
-  }
-});
-$('clear-model').addEventListener('click', () => {
-  disposeLocal();
-  localFile = undefined;
-  localContext = undefined;
-  $('model-error').hidden = true;
-  paintConnection();
-  $('model-file').focus();
-});
-
 $('chat-options').addEventListener('click', () => {
   if (!current || active?.chat === current) return;
   $('rename-input').value = current.title;

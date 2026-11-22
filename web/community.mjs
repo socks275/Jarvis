@@ -18,11 +18,12 @@ function waitSeconds(value) {
 }
 
 class CommunityError extends Error {
-  constructor(message, { refresh = false, retryAfter = 0, smaller = false } = {}) {
+  constructor(message, { refresh = false, retryAfter = 0, smaller = false, fallback = false } = {}) {
     super(message);
     this.refresh = refresh;
     this.retryAfter = retryAfter;
     this.smaller = smaller;
+    this.fallback = fallback;
   }
 }
 
@@ -52,7 +53,11 @@ function providerError(response, payload) {
   const refresh = status === 404 && ['UnknownChatModel', 'model_not_found'].includes(code)
     && !retryAfter && headers.get('x-should-retry') !== 'false';
   const smaller = status === 402 || ['KudosUpfront', 'KudosUpfrontRequired'].includes(code);
-  return new CommunityError(message, { refresh, retryAfter, smaller });
+  // These documented errors indicate that no job was queued. Do not switch
+  // after rate limits, timeouts, or an uncertain stream.
+  const fallback = [400, 402, 404, 422].includes(status) && ['no_eligible_worker', 'no_worker_supports_limit', 'KudosUpfront', 'KudosUpfrontRequired'].includes(code)
+    && !retryAfter && headers.get('x-should-retry') !== 'false';
+  return new CommunityError(message, { refresh, retryAfter, smaller, fallback });
 }
 
 function queueInfo(line) {
@@ -75,7 +80,7 @@ function reply(text, model, finish, preserveWhitespace = false) {
   };
 }
 
-async function streamReply(response, signal, onText, onQueue, preserveWhitespace = false) {
+async function streamReply(response, signal, onText, onQueue, preserveWhitespace = false, allowedModels = []) {
   const interrupted = () => new CommunityError('The online reply was interrupted before it finished. Try again in a moment.');
   if (!response.body) throw interrupted();
   const reader = response.body.getReader();
@@ -96,7 +101,10 @@ async function streamReply(response, signal, onText, onQueue, preserveWhitespace
     try { payload = JSON.parse(event); } catch { throw interrupted(); }
     // Before any words arrived nothing was interrupted; say what happened instead.
     if (payload?.error) throw text ? interrupted() : new CommunityError('The online model stopped before it wrote anything. Try again in a moment.');
-    if (typeof payload?.model === 'string') model = payload.model.trim().slice(0, 300);
+    if (typeof payload?.model === 'string') {
+      model = payload.model.trim().slice(0, 300);
+      if (model && !allowedModels.includes(model)) throw new CommunityError('The provider reported an unexpected model. The reply was stopped.');
+    }
     const choice = payload?.choices?.[0];
     if (choice?.finish_reason) finish = choice.finish_reason;
     const added = choice?.delta?.content;
@@ -164,7 +172,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
       cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: connection.signal,
     });
     if (response.ok && body && response.headers.get('Content-Type')?.includes('text/event-stream')) {
-      return await streamReply(response, connection.signal, onText, onQueue, preserveWhitespace);
+      return await streamReply(response, connection.signal, onText, onQueue, preserveWhitespace, body.models);
     }
     const data = await response.json().catch(() => null);
     connection.signal.throwIfAborted();
@@ -172,6 +180,7 @@ async function request(path, { fetchImpl, signal, body, timeout, onText = () => 
     if (!data || typeof data !== 'object') throw new CommunityError('AI Horde returned an unreadable response. Please try again.');
     if (body) {
       const choice = data.choices?.[0];
+      if (typeof data.model === 'string' && data.model.trim() && !body.models.includes(data.model.trim())) throw new CommunityError('The provider reported an unexpected model. The reply was stopped.');
       return reply(choice?.message?.content, data.model, choice?.finish_reason, preserveWhitespace);
     }
     return data;
@@ -203,6 +212,17 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
   }
   // Capacity ranking, not a claim about model quality.
   return [...models.values()].sort((a, b) => (a.queue / a.count - b.queue / b.count) || b.count - a.count || a.id.localeCompare(b.id));
+}
+
+// AI Horde is a volunteer network, not an authenticated OpenAI or Anthropic
+// endpoint. Only route to recognised GPT-OSS identifiers; a roster name alone
+// cannot authenticate a worker or provide access to proprietary GPT/Claude.
+export function eligibleCommunityModels(models) {
+  return models.filter(({ id }) => /^(?:openai\/)?gpt-oss-(?:20b|120b)(?:[-_.][a-z0-9._-]+)?$/i.test(id));
+}
+
+export async function getEligibleOnlineModels(options = {}) {
+  return eligibleCommunityModels(await getOnlineModels(options));
 }
 
 // Names are only a heuristic, not an evaluation of actual model quality.
@@ -266,7 +286,7 @@ export function describeWait({ seconds, models } = {}) {
   return `${models} ${models === 1 ? 'model' : 'models'} online · ${when}`;
 }
 
-export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [], excluded = [] } = {}) {
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [], excluded = [], maxCandidates = MAX_CANDIDATES } = {}) {
   const bannedIds = [].concat(banned ?? []);
   if (bannedIds.length) models = models.filter((m) => !bannedIds.includes(m.id));
   if (!models.length) throw new CommunityError(bannedIds.length
@@ -323,7 +343,7 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // select the better family. Constrain the list to the best available tier.
     // An explicit pin still wins, and other passes can choose a different model.
     const bestTier = code && !pin ? codeFit(lineup[0]) : 0;
-    const candidates = (bestTier ? lineup.filter((m) => codeFit(m) === bestTier) : lineup).slice(0, MAX_CANDIDATES);
+    const candidates = (bestTier ? lineup.filter((m) => codeFit(m) === bestTier) : lineup).slice(0, maxCandidates);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
       max_tokens: Math.min(...candidates.map(({ room }) => room)),
@@ -346,11 +366,13 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
       const plan = async ({ fresh = false, excluded = [] } = {}) => {
         if (fresh || !roster || Date.now() - rosterAt > ROSTER_TTL) {
           onPhase('finding');
-          roster = await getOnlineModels({ signal, fetchImpl });
+          roster = await getEligibleOnlineModels({ signal, fetchImpl });
+          roster.sort((a, b) => sizeOf(b.id) - sizeOf(a.id));
           rosterAt = Date.now();
         }
         onModels(roster);
-        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned, excluded });
+        if (!roster.length) throw new CommunityError('No eligible GPT-OSS models are online on the community network right now. Try again later.');
+        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned, excluded, maxCandidates: 1 });
       };
       const complete = async (body) => {
         onPhase('waiting');
@@ -369,14 +391,20 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
         const first = await plan();
         try { return await complete(first); }
         catch (error) {
+          if (error.fallback) {
+            try { return await complete(await plan({ excluded: first.models })); }
+            catch (fallbackError) {
+              if (fallbackError.message === 'No other compatible model is online right now. Try again later.') throw error;
+              throw fallbackError;
+            }
+          }
           if (!error.refresh) throw error;
           // The roster changed under us: look again rather than reusing it.
           const next = await plan({ fresh: true });
           if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) {
             // The roster can lag an explicit pre-queue unknown-model refusal.
-            // For coding only, try the remaining live roster once. Never do this
+            // Try another allowed model once. Never do this
             // on timeouts, disconnects, rate limits, or an ambiguous stream.
-            if (!code) throw error;
             try { return await complete(await plan({ excluded: first.models })); }
             catch (fallbackError) {
               if (fallbackError.message === 'No other compatible model is online right now. Try again later.') throw error;

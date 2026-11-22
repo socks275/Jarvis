@@ -8,7 +8,7 @@
   <!-- YouTube refuses to play an embed that arrives without a referrer
        (error 153), so state the policy here instead of inheriting one. -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co https://raw.githubusercontent.com https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://avatars.githubusercontent.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://consent.youtube.com; connect-src 'self' https://oai.aihorde.net https://api.github.com https://*.supabase.co https://api.cloudflare.com https://www.reddit.com https://*.workers.dev https://*.pages.dev https://*.deno.dev https://*.vercel.app https://*.netlify.app https://inv.nadeko.net https://yewtu.be https://invidious.nerdvpn.de https://inv.tux.pizza https://pipedapi.adminforge.de https://pipedapi.kavin.rocks https://api.piped.private.coffee https://pipedapi.reallyaweso.me; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Chorus — AI Chat</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
@@ -26,10 +26,8 @@
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a7.75 7.75 0 0 1-8 7.5c-1.2 0-2.4-.25-3.4-.72L4 20l1.4-4.15A7.2 7.2 0 0 1 4 11.5 7.76 7.76 0 0 1 12 4a7.76 7.76 0 0 1 8 7.5Z"/><path d="M8.5 10.3h7m-7 2.8h4"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4.5 7h15m-15 10h15"/><circle cx="9" cy="7" r="2.5" fill="var(--icon-bg, #16141b)"/><circle cx="15" cy="17" r="2.5" fill="var(--icon-bg, #16141b)"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.5" ry="8.5"/><path d="M3.5 12h17"/></symbol>
-    <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="12" rx="1.5"/><path d="M2.5 19h19m-11-6 2-4 2 4"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6.5 9 5.5 5.5L17.5 9"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6.5 5.5 5.5L9 17.5"/></symbol>
-    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 5v10m-4-6 4-4 4 4M5 15v4h14v-4"/></symbol>
     <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
     <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14m-6-6 6 6 6-6"/></symbol>
     <symbol id="i-arrow-ne" viewBox="0 0 24 24"><path d="M6 18 18 6m-8 0h8v8"/></symbol>
@@ -127,7 +125,7 @@
                   <button type="button" id="stop-button" class="send-button stop-button" aria-label="Stop generating" title="Stop generating" hidden><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg></button>
                 </div>
               </div>
-              <div class="composer-status" id="composer-status" role="status" hidden><span id="composer-note"></span> <button type="button" class="text-action" id="open-busy" hidden>Open chat</button><button type="button" class="text-action" id="choose-model" data-settings hidden>Choose a model</button></div>
+              <div class="composer-status" id="composer-status" role="status" hidden><span id="composer-note"></span> <button type="button" class="text-action" id="open-busy" hidden>Open chat</button></div>
             </section>
           </div>
           <div class="suggestions" aria-labelledby="suggestion-title">
@@ -182,13 +180,6 @@
 
   <dialog class="dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
     <div class="dialog-top"><div><h2 id="settings-title">Settings</h2><p>Choose how Chorus answers and manage your chats.</p></div><button type="button" class="icon-button" data-close aria-label="Close settings" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-    <fieldset class="engine-options" id="engine-options">
-      <legend>AI connection</legend>
-      <label class="engine-option"><input type="radio" name="engine" value="community" class="sr-only" checked><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><span><strong>Community AI</strong><small>Free, no key or download</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
-      <label class="engine-option"><input type="radio" name="engine" value="local" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>On-device</strong><small>Use a GGUF model file</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
-      <label class="engine-option"><input type="radio" name="engine" value="webllm" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>WebLLM</strong><small>GPU-powered local models</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
-      <label class="engine-option"><input type="radio" name="engine" value="chrome" class="sr-only"><span class="engine-choice"><span class="connection-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><span><strong>Chrome Built-in AI</strong><small>Chrome's on-device model</small></span><span class="radio-dot" aria-hidden="true"></span></span></label>
-    </fieldset>
     <div class="settings-box" id="answering-settings">
       <div class="settings-switch">
         <div><strong id="direct-label">Uncensored mode</strong><p>Ask the models to answer what you asked, without hedging: no lectures, no disclaimers, no moral verdict, and fiction answered as fiction.</p></div>
@@ -199,38 +190,12 @@
       <p class="fine-print" id="persona-note">Sent with every reply in this browser. Leave it empty for the default.</p>
       <p class="fine-print">Uncensored mode changes the instructions Chorus sends, nothing else: your messages still go to the same models, and a model’s own training still has the last word. When every model declines, the reply tells you so plainly instead of inventing an answer — switching the mode off will not make a model take it on. It applies to replies you start from now on.</p>
     </div>
-<p class="fine-print" id="settings-busy" hidden>Stop or wait for the current reply before switching connections.</p>
     <div class="settings-box" id="community-settings">
       <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
-      <p>One model helps decide how many models should answer. Coding conversations use a three-pass draft, review and final by available models even if the vote suggests fewer; if there aren’t enough distinct models the same one may be reused. The reply names the models involved. For coding, Chorus prefers compatible Qwen3-Coder or Devstral 2 models when the community has them online, and otherwise uses other available models; availability and quality vary.</p>
+      <p>One model helps decide how many models should answer. Coding conversations use a three-pass draft, review and final by available models even if the vote suggests fewer; if there aren’t enough distinct models the same one may be reused. The reply names the models involved. Chorus requests GPT-OSS models from the community network only. Community workers report their own model names; Chorus cannot independently verify them. Proprietary GPT and Claude models are not connected. Availability and free usage are limited.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
-    </div>
-    <div class="settings-box" id="webllm-settings" hidden>
-      <p>WebLLM runs one model on your device with WebGPU. The first reply downloads several gigabytes from Hugging Face and MLC; allow time and storage. Later replies can use the browser cache. Model downloads contact those hosts, but chat prompts run locally.</p>
-      <label class="text-label" for="webllm-model">Model</label>
-      <select class="text-field" id="webllm-model">
-        <option value="Qwen2.5-Coder-1.5B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 1.5B (~1.9 GB GPU memory)</option>
-        <option value="Qwen2.5-Coder-3B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 3B (~2.9 GB GPU memory)</option>
-        <option value="Qwen2.5-Coder-7B-Instruct-q4f32_1-MLC">Qwen2.5 Coder 7B (~5.9 GB GPU memory)</option>
-        <option value="Qwen2.5-1.5B-Instruct-q4f32_1-MLC">Qwen2.5 1.5B (smaller)</option>
-        <option value="Qwen2.5-3B-Instruct-q4f32_1-MLC">Qwen2.5 3B (more capable)</option>
-        <option value="Llama-3.2-3B-Instruct-q4f32_1-MLC">Llama 3.2 3B</option>
-      </select>
-      <p id="webllm-status" class="fine-print" role="status">Requires WebGPU and enough GPU memory. Larger models may not fit your device.</p>
-    </div>
-    <div class="settings-box" id="chrome-settings" hidden>
-      <p>Uses Chrome’s experimental on-device Prompt API (Gemini Nano). Availability depends on Chrome, device resources, language and browser settings. Chrome may need to download its model first. No model choice is provided by Chrome.</p>
-      <p class="fine-print">If unavailable, try another engine; selecting this option does not enable Chrome’s API.</p>
-    </div>
-    <div class="settings-box" id="local-settings" hidden>
-      <p>Only on-device chat needs a download. Your model and on-device messages stay in this browser. Select the file again after reloading the page.</p>
-      <label class="file-picker" for="model-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span id="file-label">Choose a .gguf file</span><input type="file" id="model-file" accept=".gguf" class="sr-only"></label>
-      <p id="model-error" class="model-error" role="alert" hidden></p>
-      <p id="model-window" class="fine-print" hidden></p>
-      <div class="settings-buttons"><button class="text-action" type="button" id="clear-model" hidden>Remove selected file</button></div>
-      <p class="fine-print">Need a model? <a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true" target="_blank" rel="noopener noreferrer">Qwen2.5 (491 MB)</a> or <a href="https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf" target="_blank" rel="noopener noreferrer">SmolLM2 (271 MB)</a>.</p>
     </div>
     <div class="settings-box" id="model-picks">
       <h3>Models</h3>
@@ -327,7 +292,7 @@
     <div class="dialog-top"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><button type="button" class="icon-button" data-close aria-label="Close privacy information" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <h2 id="privacy-title">Chat privacy</h2>
     <p><strong>Community AI.</strong> Your message and relevant recent conversation are sent to <a href="https://aihorde.net/privacy" target="_blank" rel="noopener noreferrer">AI Horde and its volunteer workers</a>. Don’t share private information.</p>
-    <p><strong>On-device.</strong> Your model file and on-device messages aren’t sent to the community service, even if you switch connections later.</p>
+    <p><strong>Earlier local chats.</strong> Turns from the former on-device options remain in your history but are not sent to Community AI.</p>
     <p><strong>Connectors.</strong> Keys you add for GitHub, Supabase or Cloudflare stay in this browser and are only sent to that service. They are never included in a message to a model.</p>
     <p><strong>History.</strong> Chats are stored in this browser, not synced to an account. You can delete individual chats or clear them all in Settings. That doesn’t delete data already sent to a provider.</p>
   </dialog>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { communityEngine, describeWait, getOnlineModels, planCommunityRequest, waitEstimate } from '../web/community.mjs';
+import { communityEngine, describeWait, eligibleCommunityModels, getOnlineModels, planCommunityRequest, waitEstimate } from '../web/community.mjs';
 import { answerChat } from '../web/chat.mjs';
 
 const api = 'https://oai.aihorde.net/v1';
@@ -66,11 +66,11 @@ test('a model that offers fewer tokens is still respected, and a free-tier refus
   assert.equal(planCommunityRequest(limited, { messages, purpose: 'answer' }).max_tokens, 512);
   const sizes = [];
   const { generate } = communityEngine({ fetchImpl: async (url, options) => {
-    if (url.endsWith('/models')) return list(card('worker/A'));
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
     const body = JSON.parse(options.body);
     sizes.push(body.max_tokens);
     if (body.max_tokens > 512) return refusal('KudosUpfront', 402);
-    return stream([event({ model: 'worker/A', choices: [{ delta: { content: 'Shorter answer' } }] }), event({ model: 'worker/A', choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+    return stream([event({ model: 'openai/gpt-oss-20b', choices: [{ delta: { content: 'Shorter answer' } }] }), event({ model: 'openai/gpt-oss-20b', choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
   } });
   const result = await generate({ messages, purpose: 'answer', signal: signal() });
   assert.deepEqual(sizes, [1024, 512]);
@@ -103,12 +103,12 @@ test('a coding message is offered the code models first and sampled less', () =>
 test('the engine sends the code flag through to the request it builds', async () => {
   let sent;
   const { generate } = communityEngine({ fetchImpl: async (url, options) => {
-    if (url.endsWith('/models')) return list(card('plain/chat'), card('deepseek-coder-33b'));
+    if (url.endsWith('/models')) return list(card('ignored/non-gpt'), card('openai/gpt-oss-120b'));
     sent = JSON.parse(options.body);
     return stream([event({ choices: [{ delta: { content: 'ok' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
   } });
   await generate({ messages, purpose: 'answer', signal: signal(), code: true });
-  assert.equal(sent.models[0], 'deepseek-coder-33b');
+  assert.deepEqual(sent.models, ['openai/gpt-oss-120b']);
   assert.equal(sent.temperature, 0.2);
 });
 
@@ -130,7 +130,7 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
   const phases = [], updates = [];
   let posts = 0;
   const { generate } = communityEngine({ onPhase: (...args) => phases.push(args), fetchImpl: async (url, options) => {
-    if (url.endsWith('/models')) return list(card('worker/A'), card('worker/B'));
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'), card('openai/gpt-oss-120b'));
     assert.equal(url, `${api}/chat/completions`);
     posts++;
     assert.equal(options.method, 'POST');
@@ -140,11 +140,11 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
     assert.deepEqual(JSON.parse(options.body).messages, messages);
     return stream([
       ': horde queue_position=7 wait_time=42\r\n\r\n',
-      event({ model: 'worker/B', choices: [{ delta: { role: 'assistant' } }] }),
+      event({ model: 'openai/gpt-oss-120b', choices: [{ delta: { role: 'assistant' } }] }),
       event({ choices: [{ delta: { reasoning_content: 'Not shown.' } }] }),
       event({ choices: [{ delta: { content: 'Light bends ' } }] }),
       event({ choices: [{ delta: { content: '🌈 in raindrops.' } }] }),
-      event({ model: 'worker/B', choices: [{ delta: {}, finish_reason: 'length' }] }),
+      event({ model: 'openai/gpt-oss-120b', choices: [{ delta: {}, finish_reason: 'length' }] }),
       'data: [DONE]\r\n\r\n',
     ]);
   } });
@@ -152,7 +152,7 @@ test('sends chat roles anonymously, reports queue hints, decodes actual deltas a
   assert.equal(posts, 1);
   assert.deepEqual(phases, [['finding'], ['waiting'], ['waiting', { position: 7, seconds: 42 }]]);
   assert.deepEqual(updates, ['Light bends ', 'Light bends 🌈 in raindrops.']);
-  assert.deepEqual(result, { text: 'Light bends 🌈 in raindrops.', model: 'worker/B', limited: true });
+  assert.deepEqual(result, { text: 'Light bends 🌈 in raindrops.', model: 'openai/gpt-oss-120b', limited: true });
 });
 
 test('a reply the provider finished without a closing sentinel is not called interrupted', async () => {
@@ -166,7 +166,7 @@ test('a reply the provider finished without a closing sentinel is not called int
   ];
   for (const events of bodies) {
     const { generate } = communityEngine({ fetchImpl: async (url) => url.endsWith('/models')
-      ? list(card('worker/A'))
+      ? list(card('openai/gpt-oss-20b'))
       : stream(events) });
     const result = await generate({ messages, purpose: 'answer', signal: signal() });
     assert.equal(result.text, 'All done');
@@ -179,7 +179,7 @@ test('a refused or broken stream does not report success or send a duplicate req
   for (const trailer of [[], [event({ error: { code: 'ChatStreamDiverged' } }), 'data: [DONE]\n\n']]) {
     let posts = 0;
     const { generate } = communityEngine({ fetchImpl: async (url) => {
-      if (url.endsWith('/models')) return list(card('worker/A'));
+      if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
       posts++;
       return stream([event({ choices: [{ delta: { content: 'First words' } }] }), ...trailer]);
     } });
@@ -192,7 +192,7 @@ test('honors Retry-After without retrying a failed generation', async () => {
   let requests = 0;
   const pauses = [];
   const { generate } = communityEngine({ fetchImpl: async (url) => {
-    if (url.endsWith('/models')) return list(card('only-model'));
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
     requests++;
     return refusal('rate_limit_exceeded', 429, { 'Retry-After': '12' });
   }, onLimit: (time) => pauses.push(time) });
@@ -204,7 +204,7 @@ test('honors Retry-After without retrying a failed generation', async () => {
 test('one reply asks for the roster once, not once per pass', async () => {
   let lookups = 0;
   const { generate } = communityEngine({ fetchImpl: async (url) => {
-    if (url.endsWith('/models')) { lookups++; return list(card('worker/A'), card('worker/B')); }
+    if (url.endsWith('/models')) { lookups++; return list(card('openai/gpt-oss-20b'), card('openai/gpt-oss-120b')); }
     return stream([event({ choices: [{ delta: { content: 'ok' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
   } });
   for (const purpose of ['draft', 'review', 'final']) await generate({ messages, signal: signal(), purpose });
@@ -212,21 +212,21 @@ test('one reply asks for the roster once, not once per pass', async () => {
 });
 
 test('reroutes a stale unqueued model once when the roster changed', async () => {
-  for (const replacement of ['different', 'stale']) {
+  for (const replacement of ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']) {
     let lookups = 0;
     const requests = [];
     const { generate } = communityEngine({ fetchImpl: async (url, options) => {
-      if (url.endsWith('/models')) return list(card(lookups++ ? replacement : 'stale'));
+      if (url.endsWith('/models')) return list(card(lookups++ ? replacement : 'openai/gpt-oss-120b'));
       requests.push(JSON.parse(options.body).models);
       return requests.length === 1 ? refusal('UnknownChatModel', 404) : completion(replacement, 'A direct answer.');
     } });
     const result = generate({ messages, signal: signal(), purpose: 'answer' });
-    if (replacement === 'stale') {
+    if (replacement === 'openai/gpt-oss-120b') {
       await assert.rejects(result);
-      assert.deepEqual(requests, [['stale']]);
+      assert.deepEqual(requests, [['openai/gpt-oss-120b']]);
     } else {
       assert.equal((await result).model, replacement);
-      assert.deepEqual(requests, [['stale'], ['different']]);
+      assert.deepEqual(requests, [['openai/gpt-oss-120b'], ['openai/gpt-oss-20b']]);
     }
     assert.equal(lookups, 2);
   }
@@ -237,7 +237,7 @@ test('does not submit when no model is available', async () => {
     assert.ok(url.endsWith('/models'));
     return list();
   } });
-  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No text models/);
+  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No eligible GPT-OSS models/);
 });
 
 test('Stop aborts the request', async () => {
@@ -245,7 +245,7 @@ test('Stop aborts the request', async () => {
   const waiting = new Promise((resolve) => { started = resolve; });
   const controller = new AbortController();
   const { generate } = communityEngine({ fetchImpl: async (url, options) => {
-    if (url.endsWith('/models')) return list(card('online'));
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
     started();
     return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
   } });
@@ -257,18 +257,18 @@ test('Stop aborts the request', async () => {
 
 test('the page shows the finished reply when a provider closes without [DONE]', async () => {
   const { generate } = communityEngine({ fetchImpl: async (url) => url.endsWith('/models')
-    ? list(card('worker/A'))
+    ? list(card('openai/gpt-oss-20b'))
     : stream([
-      event({ model: 'worker/A', choices: [{ delta: { content: 'Rainbows come from ' } }] }),
-      event({ model: 'worker/A', choices: [{ delta: { content: 'light bending in raindrops.' } }] }),
-      event({ model: 'worker/A', choices: [{ delta: {}, finish_reason: 'stop' }] }),
+      event({ model: 'openai/gpt-oss-20b', choices: [{ delta: { content: 'Rainbows come from ' } }] }),
+      event({ model: 'openai/gpt-oss-20b', choices: [{ delta: { content: 'light bending in raindrops.' } }] }),
+      event({ model: 'openai/gpt-oss-20b', choices: [{ delta: {}, finish_reason: 'stop' }] }),
     ]) });
   const answer = await answerChat({
     messages, mode: 'solo', signal: signal(), generate,
     onText: () => {},
   });
   assert.equal(answer.text, 'Rainbows come from light bending in raindrops.');
-  assert.equal(answer.model, 'worker/A');
+  assert.equal(answer.model, 'openai/gpt-oss-20b');
   assert.equal(answer.warning, undefined);
   assert.equal(answer.limited, undefined);
 });
@@ -343,9 +343,9 @@ test('resizing a continuation never loses the original task or partial code', ()
 test('community continuations retain whitespace in JSON and streamed replies', async () => {
   for (const streamed of [false, true]) {
     const { generate } = communityEngine({ fetchImpl: async (url) => {
-      if (url.endsWith('/models')) return list(card('worker/A'));
-      if (!streamed) return completion('worker/A', '    return 42\n');
-      return stream([event({ model: 'worker/A', choices: [{ delta: { content: '    return 42\n' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
+      if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
+      if (!streamed) return completion('openai/gpt-oss-20b', '    return 42\n');
+      return stream([event({ model: 'openai/gpt-oss-20b', choices: [{ delta: { content: '    return 42\n' } }] }), event({ choices: [{ delta: {}, finish_reason: 'stop' }] }), 'data: [DONE]\r\n\r\n']);
     } });
     const result = await generate({ messages, purpose: 'continue', signal: signal() });
     assert.equal(result.text, '    return 42\n');
@@ -374,11 +374,11 @@ test('coding uses the newer available families as the actual candidate set', () 
   assert.deepEqual(banned.models, [models[0].id]);
 });
 
-test('coding falls back to the rest of the roster after a documented stale-model refusal', async () => {
+test('coding falls back to another eligible model after a documented stale-model refusal', async () => {
   let requests = 0, lookups = 0;
   const sent = [];
-  const newer = 'Qwen/Qwen3-Coder-30B-A3B-Instruct';
-  const older = 'Qwen/Qwen2.5-Coder-32B-Instruct';
+  const newer = 'openai/gpt-oss-120b';
+  const older = 'openai/gpt-oss-20b';
   const { generate } = communityEngine({ fetchImpl: async (url, options) => {
     if (url.endsWith('/models')) { lookups++; return list(card(newer), card(older), card('general')); }
     sent.push(JSON.parse(options.body).models); requests++;
@@ -394,11 +394,52 @@ test('a coding-model timeout or cooldown never triggers an alternate submission'
   for (const response of [refusal('rate_limit_exceeded', 429, { 'Retry-After': '12' }), refusal('request_timeout', 504)]) {
     let requests = 0;
     const { generate } = communityEngine({ fetchImpl: async (url) => {
-      if (url.endsWith('/models')) return list(card('Qwen3-Coder-30B'), card('general'));
+      if (url.endsWith('/models')) return list(card('openai/gpt-oss-120b'), card('openai/gpt-oss-20b'));
       requests++;
       return response;
     } });
     await assert.rejects(generate({ messages, signal: signal(), purpose: 'draft', code: true }));
     assert.equal(requests, 1);
+  }
+});
+
+test('only GPT-OSS roster identifiers are eligible, never names that merely contain GPT or Claude', () => {
+  const names = ['openai/gpt-oss-120b', 'gpt-oss-20b', 'openai/gpt-oss-20b-q4', 'Qwen/Qwen3-Coder-30B', 'anthropic/claude-sonnet', 'openai/gpt-4o', 'fake/gpt-oss-120b', 'gpt-oss-120b:free', 'openai/gpt-oss-120b/other'];
+  assert.deepEqual(eligibleCommunityModels(names.map(id => ({ id }))).map(m => m.id), names.slice(0, 3));
+});
+
+test('a definitive pre-queue model quota rejection tries another eligible model without disclosing the quota', async () => {
+  const attempts = [];
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-120b'), card('openai/gpt-oss-20b'), card('unrelated'));
+    const body = JSON.parse(options.body); attempts.push(body);
+    if (body.models[0] === 'openai/gpt-oss-120b') return refusal('no_eligible_worker', 400);
+    return completion('openai/gpt-oss-20b', 'Done.');
+  } });
+  const result = await generate({ messages, signal: signal(), purpose: 'answer' });
+  assert.equal(result.text, 'Done.');
+  assert.deepEqual(attempts.map(a => a.models), [['openai/gpt-oss-120b'], ['openai/gpt-oss-20b']]);
+});
+
+test('fallback never uses a banned or unrelated model, and reports when none are left', async () => {
+  let posts = 0;
+  const { generate } = communityEngine({ preference: { banned: ['openai/gpt-oss-20b'] }, fetchImpl: async (url) => {
+    if (url.endsWith('/models')) return list(card('openai/gpt-oss-120b'), card('openai/gpt-oss-20b'), card('other/model'));
+    posts++; return refusal('no_eligible_worker', 400);
+  } });
+  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No online model could handle/);
+  assert.equal(posts, 1);
+});
+
+test('unexpected provider model is rejected in JSON and before streaming its text', async () => {
+  for (const streamed of [false, true]) {
+    const seen = [];
+    const { generate } = communityEngine({ fetchImpl: async (url) => {
+      if (url.endsWith('/models')) return list(card('openai/gpt-oss-20b'));
+      if (!streamed) return completion('other/model', 'wrong');
+      return stream([event({ model: 'other/model', choices: [{ delta: { content: 'wrong' } }] }), 'data: [DONE]\r\n\r\n']);
+    } });
+    await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer', onText: text => seen.push(text) }), /unexpected model/);
+    assert.deepEqual(seen, []);
   }
 });
