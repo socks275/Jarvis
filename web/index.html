@@ -192,7 +192,7 @@
     </div>
     <div class="settings-box" id="community-settings">
       <p>Chorus uses available models on <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>. Anonymous access is free, but queues and availability vary. Checking availability doesn’t send a message.</p>
-      <p>One model helps decide how many models should answer. Coding conversations use a three-pass draft, review and final by available models even if the vote suggests fewer; if there aren’t enough distinct models the same one may be reused. The reply names the models involved. Chorus requests GPT-OSS models from the community network only. Community workers report their own model names; Chorus cannot independently verify them. Proprietary GPT and Claude models are not connected. Availability and free usage are limited.</p>
+      <p>One model helps decide how many models should answer. Coding conversations use a three-pass draft, review and final by available models even if the vote suggests fewer; if there aren’t enough distinct models the same one may be reused. The reply names the models involved. Chorus prefers GPT-OSS and can fall back to available Qwen, DeepSeek, Devstral, Gemma, Llama or Mistral-family models. Community workers report their own model names; Chorus cannot independently verify them. Proprietary GPT and Claude models are not connected. Availability and free usage are limited.</p>
       <p id="network-status" class="fine-print" role="status">Availability hasn’t been checked yet.</p>
       <ul id="online-models" class="online-models" aria-label="Some available models" hidden></ul>
       <div class="settings-buttons"><button class="button border-button" type="button" id="check-network">Check availability</button><button class="text-action" type="button" id="reset-permission" hidden>Reset permission</button></div>
@@ -214,7 +214,7 @@
     </div>
     <div class="settings-box" id="youtube-settings">
       <h3>YouTube</h3>
-      <p>Ask “play <em>a song or a link</em>” in a chat to watch it here. A link plays straight away. A description is looked up through a public YouTube front-end, so no account or key is needed; if none of them answer, Chorus opens a YouTube search instead.</p>
+      <p>Ask “play <em>a song or a link</em>”, “play another”, or “play some shorts”. Short video results appear in a scrollable feed; choose one to play. Searches use public YouTube front-ends without an account or API key and can be unavailable. Short results are not verified as YouTube Shorts.</p>
     </div>
     <div class="settings-box" id="connector-settings">
       <h3>Connectors</h3>

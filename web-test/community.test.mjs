@@ -237,7 +237,7 @@ test('does not submit when no model is available', async () => {
     assert.ok(url.endsWith('/models'));
     return list();
   } });
-  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No eligible GPT-OSS models/);
+  await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer' }), /No supported community models are online/);
 });
 
 test('Stop aborts the request', async () => {
@@ -403,9 +403,9 @@ test('a coding-model timeout or cooldown never triggers an alternate submission'
   }
 });
 
-test('only GPT-OSS roster identifiers are eligible, never names that merely contain GPT or Claude', () => {
-  const names = ['openai/gpt-oss-120b', 'gpt-oss-20b', 'openai/gpt-oss-20b-q4', 'Qwen/Qwen3-Coder-30B', 'anthropic/claude-sonnet', 'openai/gpt-4o', 'fake/gpt-oss-120b', 'gpt-oss-120b:free', 'openai/gpt-oss-120b/other'];
-  assert.deepEqual(eligibleCommunityModels(names.map(id => ({ id }))).map(m => m.id), names.slice(0, 3));
+test('recognises GPT-OSS and open-weight fallback families without pretending to provide proprietary models', () => {
+  const names = ['openai/gpt-oss-120b', 'gpt-oss-20b', 'openai/gpt-oss-20b-q4', 'koboldcpp/gpt-oss-20b-Q4_K_M', 'llamacpp/openai/gpt-oss-120b', 'Qwen/Qwen3-Coder-30B', 'anthropic/claude-sonnet', 'openai/gpt-4o', 'fake/gpt-oss-120b', 'gpt-oss-120b:free', 'openai/gpt-oss-120b/other'];
+  assert.deepEqual(eligibleCommunityModels(names.map(id => ({ id }))).map(m => m.id), names.slice(0, 6));
 });
 
 test('a definitive pre-queue model quota rejection tries another eligible model without disclosing the quota', async () => {
@@ -442,4 +442,61 @@ test('unexpected provider model is rejected in JSON and before streaming its tex
     await assert.rejects(generate({ messages, signal: signal(), purpose: 'answer', onText: text => seen.push(text) }), /unexpected model/);
     assert.deepEqual(seen, []);
   }
+});
+
+
+test('GPT-OSS worker-prefixed IDs are discovered and sent unchanged', async () => {
+  const id = 'koboldcpp/gpt-oss-20b-Q4_K_M';
+  let sent;
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('koboldcpp/Qwen3-14B'), card(id));
+    sent = JSON.parse(options.body);
+    return completion(id, 'Ready.');
+  } });
+  const answer = await generate({ messages, signal: signal(), purpose: 'answer' });
+  assert.deepEqual(sent.models, [id]);
+  assert.equal(answer.model, id);
+  assert.equal(answer.text, 'Ready.');
+});
+
+test('when GPT-OSS is offline, Qwen and other recognised model families are available', async () => {
+  const ids = [
+    'koboldcpp/Qwen/Qwen3.8-27B', 'koboldcpp/Qwen3-14B', 'koboldcpp/gemma-4-E4B-it',
+    'llamacpp/DeepSeek-R1-70B', 'koboldcpp/Devstral-Small-2-24B', 'llamacpp/Llama-3.3-70B-Instruct',
+    'koboldcpp/Qwen3-14B-Base', 'random-claude-sonnet', 'random/gpt-oss-20b',
+  ];
+  assert.deepEqual(eligibleCommunityModels(ids.map(id => ({ id }))).map(m => m.id), ids.slice(0, 6));
+  let sent;
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(...ids.map(id => card(id)));
+    sent = JSON.parse(options.body);
+    return completion(sent.models[0], 'A response');
+  } });
+  const result = await generate({ messages, purpose: 'answer', signal: signal() });
+  assert.ok(ids.slice(0, 6).includes(result.model));
+  assert.deepEqual(sent.models, [result.model]);
+});
+
+test('GPT-OSS remains preferred when a fallback family is also online', async () => {
+  let sent;
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(card('koboldcpp/Qwen/Qwen3.8-27B'), card('openai/gpt-oss-20b', { max: 512 }));
+    sent = JSON.parse(options.body);
+    return completion(sent.models[0], 'OK');
+  } });
+  await generate({ messages, purpose: 'draft', signal: signal(), code: true });
+  assert.deepEqual(sent.models, ['openai/gpt-oss-20b']);
+});
+
+test('several definitive pre-queue refusals try distinct supported alternatives', async () => {
+  const attempts = [];
+  const ids = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'koboldcpp/Qwen3-14B'];
+  const { generate } = communityEngine({ fetchImpl: async (url, options) => {
+    if (url.endsWith('/models')) return list(...ids.map(id => card(id)));
+    const id = JSON.parse(options.body).models[0]; attempts.push(id);
+    return attempts.length < 3 ? refusal('no_eligible_worker', 400) : completion(id, 'Answer');
+  } });
+  const result = await generate({ messages, signal: signal(), purpose: 'answer' });
+  assert.deepEqual(attempts, ids);
+  assert.equal(result.model, ids[2]);
 });

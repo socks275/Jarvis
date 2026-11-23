@@ -3,7 +3,7 @@ import { createFormatter } from './format.mjs';
 import { answerChat, chatToJson, chatToMarkdown, cleanPrompt, conversationContext, createChat, newTurn, orderedChats, PROMPT_LIMIT, readChats, rewindTo, saveChats } from './chat.mjs';
 import { communityEngine, describeWait, getEligibleOnlineModels, waitEstimate } from './community.mjs';
 import { fetchPage, findUrls, sourceContext } from './read.mjs';
-import { embedUrl, playRequest, searchUrl, searchVideo, thumbnailUrl, watchUrl, youtubeId } from './youtube.mjs';
+import { embedUrl, playRequest, resolveAnother, searchUrl, searchVideos, thumbnailUrl, videoIds, watchUrl, youtubeId } from './youtube.mjs';
 import { buildGame, gameTweak, isGameRequest, mergeGameOptions, pickTheme, themeName } from './game.mjs';
 import { SERVICES, githubIdentity, isConnected, parseConnectorRequest, readConnectors, runConnector, summarise, testConnector, writeConnectors } from './connectors.mjs';
 import { OAUTH_STATE_KEY, authorizeUrl, cleanUrl, readCallback, redeemCode } from './oauth.mjs';
@@ -82,6 +82,7 @@ const drafts = readDrafts();
 let active;
 let pendingNodes;
 let streamFrame = 0;
+let autoPlayVideo;
 const engine = 'community';
 let deeper = false;
 // Uncensored mode: off unless it was switched on in this browser.
@@ -316,7 +317,7 @@ function paintSettings() {
   $('network-status').textContent = statusController ? 'Checking available models…' : networkError || (models === undefined
     ? 'Availability hasn’t been checked yet.' : models.length
       ? `${models.length} ${models.length === 1 ? 'text model was' : 'text models were'} online at the last check.`
-      : 'No eligible GPT-OSS models were online at the last check.');
+      : 'No supported community models were online at the last check.');
   $('online-models').replaceChildren(...(networkError ? [] : (models ?? []).slice(0, 5).map(({ id }) => el('li', '', id))));
   $('online-models').hidden = Boolean(networkError || !models?.length || statusController);
   $('check-network').disabled = Boolean(active || statusController || retryAt > Date.now());
@@ -588,7 +589,7 @@ async function copy(text, control, done = 'Copied to clipboard') {
   toast(done);
 }
 
-function videoCard(video, { pending = false, onRetry } = {}) {
+function videoCard(video, { pending = false, onRetry, onPlay = () => {}, auto = false } = {}) {
   const card = el('div', 'video-card');
   if (video.id) {
     const frame = el('div', 'video-frame');
@@ -604,7 +605,8 @@ function videoCard(video, { pending = false, onRetry } = {}) {
     const badge = el('span', 'video-play');
     badge.append(icon('play'));
     poster.append(image, badge);
-    poster.addEventListener('click', () => {
+    const start = (focus = false) => {
+      onPlay();
       const player = el('iframe', 'video-player');
       player.src = embedUrl(video.id);
       // Without a referrer YouTube answers with "Video player configuration
@@ -626,9 +628,12 @@ function videoCard(video, { pending = false, onRetry } = {}) {
         poster.focus({ preventScroll: true });
       });
       frame.replaceChildren(player, close);
-      player.focus({ preventScroll: true });
-    });
+      if (focus) player.focus({ preventScroll: true });
+    };
+    poster.addEventListener('click', () => start(true));
+    frame.stopVideo = () => { if (frame.contains(poster)) return; frame.replaceChildren(poster); };
     frame.append(poster);
+    if (auto) queueMicrotask(() => { if (frame.isConnected) start(false); });
     card.append(frame);
   }
   const meta = el('div', 'video-meta');
@@ -650,7 +655,7 @@ function videoCard(video, { pending = false, onRetry } = {}) {
     if (pending) {
       meta.append(link, el('small', 'video-hint', 'Looking for the video…'));
     } else {
-      meta.append(link, el('small', 'video-hint', 'The video search is unavailable right now, so this opens YouTube instead.'));
+      meta.append(link, el('small', 'video-hint', video.another ? 'No different result was found. Try another search or open YouTube.' : video.shorts ? 'No short videos were found. Try another search or open YouTube.' : 'The video search is unavailable right now, so this opens YouTube instead.'));
       if (onRetry) {
         const retry = el('button', 'video-retry', 'Try again');
         retry.type = 'button';
@@ -661,6 +666,35 @@ function videoCard(video, { pending = false, onRetry } = {}) {
   }
   card.append(meta);
   return card;
+}
+
+function shortFeed(video) {
+  const wrapper = el('section', 'shorts-wrapper');
+  wrapper.setAttribute('aria-label', 'Short video results');
+  wrapper.append(el('p', 'shorts-hint', 'Scroll or use Next for more short videos. Tap a video to play; playback stops when it scrolls out of view. Results are short videos, not verified YouTube Shorts.'));
+  const feed = el('div', 'shorts-feed');
+  feed.tabIndex = 0;
+  feed.setAttribute('role', 'region');
+  feed.setAttribute('aria-label', 'Scrollable short videos');
+  const stopOthers = () => feed.querySelectorAll('.video-frame').forEach((frame) => frame.stopVideo?.());
+  for (const item of video.items) feed.append(videoCard(item, { onPlay: stopOthers }));
+  feed.addEventListener('scroll', () => {
+    const bounds = feed.getBoundingClientRect();
+    feed.querySelectorAll('.video-frame').forEach((frame) => {
+      const rect = frame.getBoundingClientRect();
+      if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) frame.stopVideo?.();
+    });
+  }, { passive: true });
+  const controls = el('div', 'shorts-controls');
+  for (const [label, direction] of [['Previous', -1], ['Next', 1]]) {
+    const control = el('button', 'video-retry', label);
+    control.type = 'button';
+    control.setAttribute('aria-label', `${label} short video`);
+    control.addEventListener('click', () => { stopOthers(); feed.scrollBy({ top: direction * feed.clientHeight * 0.85, behavior: 'smooth' }); });
+    controls.append(control);
+  }
+  wrapper.append(feed, controls);
+  return wrapper;
 }
 
 function connectorCard(data) {
@@ -805,9 +839,10 @@ function messageNode(message, last) {
   if (message.connector) content.append(connectorCard(message.connector));
   if (message.video) {
     const mine = current?.messages.includes(message);
-    content.append(videoCard(message.video, {
-      pending: message.status === 'pending',
-      onRetry: mine && message.video.query ? () => findVideo(message) : undefined,
+    if (message.video.shorts && message.video.items?.length) content.append(shortFeed(message.video));
+    else content.append(videoCard(message.video, {
+      pending: message.status === 'pending', auto: message.id === autoPlayVideo,
+      onRetry: mine && message.video.query ? () => findVideo(message, current) : undefined,
     }));
   } else if (message.status === 'complete' && message.text) {
     const linked = youtubeId(message.text);
@@ -1029,7 +1064,11 @@ function tryReply(action) {
   }
   // Playing a video needs no model, so it happens immediately.
   if (!retry) {
-    const play = playRequest(text);
+    let play = playRequest(text);
+    if (play?.another) {
+      const messages = editTarget?.chat === current ? current.messages.slice(0, editTarget.index) : current?.messages ?? [];
+      play = resolveAnother(messages.filter(m => m.role === 'assistant').map(m => m.video)) ?? { missingPrevious: true };
+    }
     if (play) { startPlay(text, play); return; }
   }
   // A 3D game is a known build, not a guess: it is assembled here, runs in the
@@ -1151,17 +1190,29 @@ async function startPlay(text, play) {
     chats = [current, ...orderedChats(chats).slice(0, 31)];
     urlForChat(current);
   }
-  const reply = newTurn(current, text, engine);
+  if (editTarget?.chat === current) {
+    rewindTo(current, editTarget.index);
+    editTarget = undefined;
+  }
+  const chat = current;
+  const reply = newTurn(chat, text, engine);
   prompt.value = '';
   sizePrompt();
+  writeDrafts();
   paintComposer();
-  Object.assign(reply, { status: 'complete', video: play.id ? { id: play.id } : { query: play.query } });
-  current.updatedAt = Date.now();
+  if (play.missingPrevious) {
+    Object.assign(reply, { status: 'complete', text: 'What should I play another of? Tell me a topic or video title first.' });
+  } else {
+    Object.assign(reply, { status: 'complete', video: play.id ? { id: play.id } : { query: play.query, ...(play.shorts ? { shorts: true } : {}), ...(play.another ? { another: true } : {}) } });
+  }
+  chat.updatedAt = Date.now();
   save();
   paintView(true);
   paintHistory();
-  if (!play.id) await findVideo(reply);
-  $('announcer').textContent = play.id ? 'Playing the video.' : 'Finding the video.';
+  if (play.query) {
+    $('announcer').textContent = play.shorts ? 'Finding short videos.' : 'Finding the video.';
+    await findVideo(reply, chat);
+  } else if (play.id) $('announcer').textContent = 'Video ready. Press play to watch.';
 }
 
 // No key needed: public front-ends answer the search when they can, and the
@@ -1204,17 +1255,27 @@ ${html}
   $('announcer').textContent = 'The game is ready in the canvas. Press Run to play.';
 }
 
-async function findVideo(reply) {
+async function findVideo(reply, chat = current) {
+  if (!reply.video?.query || reply.status === 'pending' || !chat?.messages.includes(reply)) return;
   reply.status = 'pending';
-  paintView(true);
-  const found = await searchVideo(reply.video?.query).catch(() => undefined);
-  if (found) {
-    reply.video = found;
+  if (current === chat) paintView(true);
+  const index = chat.messages.indexOf(reply);
+  const earlier = chat.messages.slice(0, index).filter((message) => message.role === 'assistant').map((message) => message.video);
+  const found = await searchVideos(reply.video.query, { shorts: reply.video.shorts === true, exclude: reply.video.another ? videoIds(earlier) : [], limit: reply.video.shorts ? 12 : 1 }).catch(() => []);
+  // A search may finish after the chat was deleted, edited, or switched.
+  if (!chats.includes(chat) || !chat.messages.includes(reply)) return;
+  if (found.length) {
+    reply.video = reply.video.shorts ? { ...reply.video, items: found } : { ...reply.video, ...found[0] };
     delete reply.warning;
   }
   reply.status = 'complete';
   save();
-  paintView(true);
+  if (current === chat) {
+    if (found.length && reply.video.another && !reply.video.shorts) autoPlayVideo = reply.id;
+    paintView(true);
+    autoPlayVideo = undefined;
+    $('announcer').textContent = found.length ? (reply.video.shorts ? `${found.length} short videos found. Scroll and select one to play.` : 'Video ready. If playback does not start, press play.') : 'No video found. Try the YouTube search link.';
+  }
   paintHistory();
 }
 

@@ -841,3 +841,21 @@ test('legacy local, WebLLM, and Chrome chats stay saved and never enter communit
   assert.match(context, /community question/);
   assert.match(context, /new community request/);
 });
+
+test('short video feeds and search topic survive a chat reload', () => {
+  const storage = fakeStorage();
+  const chat = createChat('cats');
+  const reply = newTurn(chat, 'play cat shorts', 'community');
+  Object.assign(reply, { status: 'complete', video: { query: 'cat shorts', shorts: true, another: true, items: [{ id: 'aaaaaaaaaaa', title: 'One' }, { id: 'bbbbbbbbbbb', title: 'Two' }] } });
+  assert.equal(saveChats(storage, [chat]), true);
+  assert.deepEqual(readChats(storage)[0].messages[1].video, reply.video);
+});
+
+test('invalid saved short-video feed is not accepted as a valid chat', () => {
+  const storage = fakeStorage();
+  const chat = createChat('cats');
+  const reply = newTurn(chat, 'play shorts', 'community');
+  Object.assign(reply, { status: 'complete', video: { query: 'shorts', shorts: true, items: [{ id: 'bad/id' }] } });
+  storage.setItem(HISTORY_KEY, JSON.stringify([chat]));
+  assert.deepEqual(readChats(storage), []);
+});
