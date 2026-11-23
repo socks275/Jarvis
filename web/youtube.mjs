@@ -32,7 +32,7 @@ export function playRequest(text) {
     const topic = value.replace(PLAY, '').replace(/\b(?:on|in|from)\s+youtube\b/gi, '').replace(/\bshorts\b/gi, ' ')
       .replace(/^\s*(?:(?:me|us)\s+)?(?:(?:some|a few|the)\s+)?(?:about\s+|of\s+)?/i, '')
       .replace(/^[\s:,-]+|[\s.!?,-]+$/g, '').replace(/\s+/g, ' ').trim();
-    return { query: topic ? `${topic.slice(0, 193)} shorts` : 'short videos', shorts: true };
+    return { query: topic ? `${topic.slice(0, 193)} shorts` : 'shorts', shorts: true };
   }
   const rest = value
     .replace(PLAY, '')
@@ -85,8 +85,6 @@ export const embedUrl = (id, { auto = true } = {}) => `${PLAYER_ORIGIN}/embed/${
   + `?rel=0&playsinline=1${auto ? '&autoplay=1' : ''}`;
 
 // Public front-ends that answer a search without an account or an API key.
-// Each one is tried in turn and the first usable answer wins.
-// Public front-ends that answer a search without an account or an API key.
 // They are asked at the same time and the first usable answer wins, so a slow
 // or retired instance never holds up the reply. Keep this list in step with
 // the connect-src list in web/index.html.
@@ -113,9 +111,9 @@ function fromInvidious(data) {
   if (!Array.isArray(data)) return [];
   return data.flatMap((item) => {
     const id = item?.videoId;
-    if (typeof id !== 'string' || !VIDEO_ID.test(id) || item.type && item.type !== 'video') return [];
+    if (typeof id !== 'string' || !VIDEO_ID.test(id) || item.type && !['video', 'short'].includes(item.type)) return [];
     const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
-    return [{ id, ...(title ? { title } : {}), duration: item.lengthSeconds }];
+    return [{ id, ...(title ? { title } : {}), duration: item.lengthSeconds, short: item.type === 'short' || item.isShort === true || /\/shorts\//i.test(String(item.url ?? '')), live: item.liveNow === true || item.isLive === true }];
   });
 }
 
@@ -123,9 +121,9 @@ function fromPiped(data) {
   if (!Array.isArray(data?.items)) return [];
   return data.items.flatMap((item) => {
     const id = /(?:v=|\/)([\w-]{11})(?:[&?]|$)/.exec(String(item?.url ?? ''))?.[1];
-    if (!id || !VIDEO_ID.test(id) || item.type && item.type !== 'stream') return [];
+    if (!id || !VIDEO_ID.test(id) || item.type && !['stream', 'short'].includes(item.type)) return [];
     const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
-    return [{ id, ...(title ? { title } : {}), duration: item.duration }];
+    return [{ id, ...(title ? { title } : {}), duration: item.duration, short: item.type === 'short' || item.isShort === true || /\/shorts\//i.test(String(item.url ?? '')), live: item.isLive === true || item.liveNow === true }];
   });
 }
 
@@ -138,7 +136,7 @@ async function ask(instance, query, fetchImpl, signal, { shorts, exclude, limit 
   const items = instance.kind === 'piped' ? fromPiped(data) : fromInvidious(data);
   const seen = new Set(exclude);
   return items.filter((item) => {
-    if (seen.has(item.id) || (shorts && (!Number.isFinite(item.duration) || item.duration <= 0 || item.duration > 60))) return false;
+    if (seen.has(item.id) || (shorts && (item.live || (Number.isFinite(item.duration) && item.duration < 0) || !(item.short || (Number.isFinite(item.duration) && item.duration > 0 && item.duration <= 60))))) return false;
     seen.add(item.id);
     return true;
   }).slice(0, limit).map(({ id, title }) => ({ id, ...(title ? { title } : {}) }));
@@ -152,10 +150,12 @@ export async function searchVideos(query, { fetchImpl = globalThis.fetch, signal
   const controller = new AbortController();
   const max = Math.max(1, Math.min(12, Number.isFinite(limit) ? Math.floor(limit) : 12));
   let timer;
+  let collectTimer;
   let stop;
   try {
     return await new Promise((resolve) => {
       let open = ordered.length, settled = false;
+      const collected = new Map();
       const finish = (items) => {
         if (settled) return;
         settled = true;
@@ -164,17 +164,26 @@ export async function searchVideos(query, { fetchImpl = globalThis.fetch, signal
       };
       stop = () => finish([]);
       signal?.addEventListener('abort', stop, { once: true });
-      timer = setTimeout(stop, timeout);
+      timer = setTimeout(() => finish([...collected.values()].slice(0, max)), timeout);
       if (signal?.aborted) { stop(); return; }
       for (const instance of ordered) {
         ask(instance, clean, fetchImpl, controller.signal, { shorts, exclude, limit: max })
-          .then((found) => { if (found.length && !settled) { preferred = instance.url; finish(found); } })
+          .then((found) => {
+            if (!found.length || settled) return;
+            preferred = instance.url;
+            if (!shorts) { finish(found); return; }
+            for (const item of found) if (!collected.has(item.id)) collected.set(item.id, item);
+            if (collected.size >= max) { finish([...collected.values()].slice(0, max)); return; }
+            // Give other front-ends a brief chance to fill a sparse feed.
+            if (!collectTimer) collectTimer = setTimeout(() => finish([...collected.values()].slice(0, max)), 500);
+          })
           .catch(() => {})
-          .finally(() => { if (--open === 0) finish([]); });
+          .finally(() => { if (--open === 0) finish([...collected.values()].slice(0, max)); });
       }
     });
   } finally {
     clearTimeout(timer);
+    clearTimeout(collectTimer);
     controller.abort();
     if (stop) signal?.removeEventListener('abort', stop);
   }

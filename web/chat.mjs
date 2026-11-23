@@ -96,7 +96,7 @@ export function isCodeThread(messages) {
 // A message that asks for something, even without a question mark, is not small talk.
 const QUESTION_WORD = /(?:^|\s)(?:what|why|how|when|where|who|which|whose|whom|can|could|should|would|do|does|did|is|are|was|were|will|shall|may|might)\b/i;
 const REQUEST_WORD = /\b(?:explain|describe|summari[sz]e|compare|contrast|analy[sz]e|write|draft|list|give|show|help|make|create|fix|plan|build|translate|prove|calculate|suggest|recommend|teach|tell|review|check|find|convert|generate|design|outline|brainstorm|improve|rewrite|solve|walk|outline)\b/i;
-const SMALL_TALK = /^(?:hi|hello|hey|hiya|yo|thanks|thank you|cheers|ok|okay|cool|nice|great|perfect|got it|sounds good|good morning|good afternoon|good evening|good night|bye|goodbye|see you|lol|haha|yes|no|maybe)\b/i;
+const SMALL_TALK = /^(?:hi|hello|hey|hiya|yo|thanks(?:,? that helps(?: a lot)?)?|thank you|cheers|ok|okay|cool|nice|great|perfect|got it|sounds good|good morning|good afternoon|good evening|good night|bye|goodbye|see you|lol|haha|yes|no|maybe)[\s.!]*$/i;
 
 /**
  * How many models should work on this message.

@@ -322,7 +322,7 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
       const others = adequate.filter((m) => !avoid.includes(m.id));
       const pool = others.length ? others : adequate;
       const hasPin = purpose !== 'triage' && pinned && !avoid.includes(pinned) && pool.some((m) => m.id === pinned);
-      if (hasPin || (familyMode ? pool.some((m) => communityModelTier(m.id) === 3 || (code && communityModelTier(m.id) === 2)) : pool.some((m) => codeFit(m) === 2))) return body(pool, context);
+      if (hasPin || (familyMode ? pool.length > 0 : pool.some((m) => codeFit(m) === 2))) return body(pool, context);
     }
     if (full.length) return body(full, context);
     if (fitting.length && !reduced) reduced = body(fitting, context);
@@ -343,8 +343,14 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // by a small context just as surely as by a small token budget. The pass
     // that finishes a reply prefers a bigger model when one is reachable.
     const ranked = code || purpose === 'final' ? orderForQuality(pool) : pool;
+    // Avoid a severely congested preferred family when another supported
+    // model has substantially less work per worker. Unknown queues are not
+    // treated as a fast queue. The numbers are hints, not guaranteed timing.
+    const knownWaits = ranked.map((m) => m.queue / m.count).filter(Number.isFinite);
+    const fastest = knownWaits.length ? Math.min(...knownWaits) : Infinity;
+    const reachable = (m) => Number.isFinite(m.queue / m.count) && m.queue / m.count <= fastest + QUEUE_SLACK;
     const ordered = familyMode
-      ? [...ranked].sort((a, b) => (communityModelTier(b.id) - communityModelTier(a.id)) || (sizeOf(b.id) - sizeOf(a.id)))
+      ? [...ranked].sort((a, b) => (Number(reachable(b)) - Number(reachable(a))) || (communityModelTier(b.id) - communityModelTier(a.id)) || (sizeOf(b.id) - sizeOf(a.id)))
       : code ? [...ranked].sort((a, b) => (codeFit(b) - codeFit(a)) || 0) : ranked;
     // A pinned model leads its pass, but never a triage vote and never a pass
     // that is meant to be written by a different model than the draft.

@@ -500,3 +500,13 @@ test('several definitive pre-queue refusals try distinct supported alternatives'
   assert.deepEqual(attempts, ids);
   assert.equal(result.model, ids[2]);
 });
+
+test('a severely congested preferred family does not block a much less busy fallback', () => {
+  const models = [
+    { id: 'openai/gpt-oss-120b', count: 1, queue: 100, context: 8192, tokens: 1024 },
+    { id: 'koboldcpp/Qwen3-14B', count: 4, queue: 0, context: 8192, tokens: 1024 },
+  ];
+  assert.deepEqual(planCommunityRequest(models, { messages, purpose: 'draft', familyMode: true, maxCandidates: 1 }).models, ['koboldcpp/Qwen3-14B']);
+  models[0].queue = 2;
+  assert.deepEqual(planCommunityRequest(models, { messages, purpose: 'draft', familyMode: true, maxCandidates: 1 }).models, ['openai/gpt-oss-120b']);
+});
