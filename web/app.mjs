@@ -656,6 +656,13 @@ function videoCard(video, { pending = false, onRetry, onPlay = () => {}, auto = 
       meta.append(link, el('small', 'video-hint', 'Looking for the video…'));
     } else {
       meta.append(link, el('small', 'video-hint', video.another ? 'No different result was found. Try another search or open YouTube.' : video.shorts ? 'No short videos could be loaded from the search services. Try again or search on YouTube.' : 'The video search is unavailable right now, so this opens YouTube instead.'));
+      if (video.shorts) {
+        const shortsLink = el('a', 'video-link', 'Open YouTube Shorts');
+        shortsLink.href = 'https://www.youtube.com/shorts/';
+        shortsLink.target = '_blank';
+        shortsLink.rel = 'noopener noreferrer';
+        meta.append(shortsLink);
+      }
       if (onRetry) {
         const retry = el('button', 'video-retry', 'Try again');
         retry.type = 'button';

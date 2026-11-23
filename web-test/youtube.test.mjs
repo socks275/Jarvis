@@ -146,3 +146,16 @@ test('short feed combines and deduplicates results from responsive front-ends', 
     : [{ type: 'video', videoId: 'aaaaaaaaaaa', lengthSeconds: 12 }, { type: 'video', videoId: 'bbbbbbbbbbb', lengthSeconds: 30 }]) });
   assert.deepEqual(results.map(item => item.id), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
 });
+
+test('short search tries a duration-oriented query when regular search returns only long videos', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const queries = [];
+  const results = await searchVideos('cats shorts', { shorts: true, instances: [{ kind: 'piped', url: 'https://a.test/?q=' }], fetchImpl: async (url) => {
+    const query = decodeURIComponent(url.split('q=')[1]); queries.push(query);
+    return Response.json({ items: query === 'cats 30 seconds'
+      ? [{ type: 'stream', url: '/watch?v=aaaaaaaaaaa', duration: 30, title: 'Short clip' }]
+      : [{ type: 'stream', url: '/watch?v=bbbbbbbbbbb', duration: 800, title: 'About shorts' }] });
+  } });
+  assert.deepEqual(queries, ['cats shorts', 'cats 30 seconds']);
+  assert.deepEqual(results, [{ id: 'aaaaaaaaaaa', title: 'Short clip' }]);
+});

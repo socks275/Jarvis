@@ -313,6 +313,18 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     const fitting = models.map((m) => ({ ...m, room: Math.floor(Math.min(desired, m.tokens, m.context - input)) }))
       .filter((m) => m.room >= MIN_TOKENS);
     const full = fitting.filter((m) => m.room >= desired);
+    // For the first visible response, do not wait behind a heavily loaded
+    // 512-token worker if a 256-token worker is substantially less busy.
+    // Keep the full message; continuation can complete a truncated draft.
+    if (familyMode && !code && (purpose === 'draft' || purpose === 'answer') && !pinned) {
+      const quick = fitting.filter((m) => m.room >= 256 && Number.isFinite(m.queue / m.count));
+      const roomy = quick.filter((m) => m.room >= Math.min(desired, FREE_TOKENS));
+      const bestQuick = Math.min(...quick.map((m) => m.queue / m.count));
+      const bestRoomy = Math.min(...roomy.map((m) => m.queue / m.count));
+      if (quick.length && bestQuick + QUEUE_SLACK < bestRoomy) {
+        return body(quick.filter((m) => m.queue / m.count <= bestQuick + QUEUE_SLACK), context);
+      }
+    }
     // Prefer a recent coder with a usable output budget over a general model
     // with a larger budget. Keep the whole current context and honour pin and
     // diversity preferences before making this trade-off.
