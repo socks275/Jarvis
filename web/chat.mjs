@@ -528,6 +528,11 @@ function validChat(item) {
         && (m.video === undefined || (m.video && typeof m.video === 'object'
           && (m.video.id === undefined || isText(m.video.id, 20)) && (m.video.query === undefined || isText(m.video.query, 200))
           && (m.video.title === undefined || isText(m.video.title, 300))
+          && (m.video.shorts === undefined || typeof m.video.shorts === 'boolean')
+          && (m.video.another === undefined || typeof m.video.another === 'boolean')
+          && (m.video.items === undefined || (Array.isArray(m.video.items) && m.video.items.length <= 12
+            && m.video.items.every((item) => item && typeof item.id === 'string' && /^[\w-]{11}$/.test(item.id)
+              && (item.title === undefined || isText(item.title, 200)))))
           && (m.video.id !== undefined || m.video.query !== undefined)))
         && (m.team === undefined || (Array.isArray(m.team) && m.team.length > 0 && m.team.length <= 4
           && m.team.every((s) => s && ['triage', 'answer', 'draft', 'review', 'final'].includes(s.role)

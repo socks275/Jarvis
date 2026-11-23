@@ -674,3 +674,13 @@ a.connector-item:hover { color: #fff; text-decoration: underline; }
 .shortcut-list kbd { font: 600 11px/1.6 var(--mono); padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px; background: #221b2e; color: #e1cff5; }
 .message-user .message-actions { justify-content: flex-end; margin-top: 4px; }
 .history-pinned { margin-left: auto; padding: 1px 6px; border: 1px solid #5b4468; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #cdb4e6; }
+
+/* Short-form search results are lazy: only the video the user selects loads. */
+.shorts-wrapper { margin: 12px 0; max-width: 430px; }
+.shorts-hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.shorts-feed { max-height: min(72vh, 650px); overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; border: 1px solid var(--line); border-radius: 14px; padding: 8px; }
+.shorts-feed:focus-visible { outline: 2px solid #ba97fc; outline-offset: 2px; }
+.shorts-feed .video-card { max-width: none; margin: 0 0 16px; scroll-snap-align: start; }
+.shorts-feed .video-frame { aspect-ratio: 9 / 16; max-height: min(62vh, 520px); }
+.shorts-feed .video-frame img { object-fit: contain; }
+.shorts-controls { display: flex; gap: 8px; margin-top: 8px; }

@@ -214,11 +214,23 @@ export async function getOnlineModels({ signal, fetchImpl = globalThis.fetch } =
   return [...models.values()].sort((a, b) => (a.queue / a.count - b.queue / b.count) || b.count - a.count || a.id.localeCompare(b.id));
 }
 
-// AI Horde is a volunteer network, not an authenticated OpenAI or Anthropic
-// endpoint. Only route to recognised GPT-OSS identifiers; a roster name alone
-// cannot authenticate a worker or provide access to proprietary GPT/Claude.
+// Roster names are reported by volunteers, not independently verified model
+// identities. GPT-OSS is preferred; recognised open-weight families are
+// allowed as fallbacks. This never claims access to proprietary GPT or Claude.
+export function communityModelTier(id) {
+  if (typeof id !== 'string') return 0;
+  const name = id.replace(/^(?:koboldcpp|llamacpp)\//i, '');
+  if (/^(?:openai\/)?gpt-oss-(?:20b|120b)(?:[-_.][a-z0-9._-]+)?$/i.test(name)) return 3;
+  // Ignore base, embedding and reward models: these are not chat assistants.
+  if (/(?:^|[-_/])(base|embedding|embed|reranker|reward)(?:$|[-_/.])/i.test(name)) return 0;
+  const base = name.replace(/^(?:qwen|deepseek-ai|mistralai|meta-llama|google)\//i, '');
+  if (/^(?:qwen[23](?:[._-][0-9]+)?[-_.]?coder|devstral|deepseek[-_.]?(?:r1|v3|coder))/i.test(base)) return 2;
+  if (/^(?:qwen[23](?:[._-][0-9]+)?|gemma[-_.]?[234]|llama[-_.]?3(?:[._-][0-9]+)?|mistral[-_.]|mixtral[-_.])/i.test(base)) return 1;
+  return 0;
+}
+
 export function eligibleCommunityModels(models) {
-  return models.filter(({ id }) => /^(?:openai\/)?gpt-oss-(?:20b|120b)(?:[-_.][a-z0-9._-]+)?$/i.test(id));
+  return models.filter(({ id }) => communityModelTier(id) > 0);
 }
 
 export async function getEligibleOnlineModels(options = {}) {
@@ -286,7 +298,7 @@ export function describeWait({ seconds, models } = {}) {
   return `${models} ${models === 1 ? 'model' : 'models'} online · ${when}`;
 }
 
-export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [], excluded = [], maxCandidates = MAX_CANDIDATES } = {}) {
+export function planCommunityRequest(models, { messages, purpose, preferOtherThan, code = false, pinned = '', banned = [], excluded = [], maxCandidates = MAX_CANDIDATES, familyMode = false } = {}) {
   const bannedIds = [].concat(banned ?? []);
   if (bannedIds.length) models = models.filter((m) => !bannedIds.includes(m.id));
   if (!models.length) throw new CommunityError(bannedIds.length
@@ -304,13 +316,13 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // Prefer a recent coder with a usable output budget over a general model
     // with a larger budget. Keep the whole current context and honour pin and
     // diversity preferences before making this trade-off.
-    if (code) {
+    if (code || familyMode) {
       const adequate = fitting.filter((m) => m.room >= Math.min(desired, FREE_TOKENS));
       const avoid = preferOtherThan ? [].concat(preferOtherThan) : [];
       const others = adequate.filter((m) => !avoid.includes(m.id));
       const pool = others.length ? others : adequate;
       const hasPin = purpose !== 'triage' && pinned && !avoid.includes(pinned) && pool.some((m) => m.id === pinned);
-      if (hasPin || pool.some((m) => codeFit(m) === 2)) return body(pool, context);
+      if (hasPin || (familyMode ? pool.some((m) => communityModelTier(m.id) === 3 || (code && communityModelTier(m.id) === 2)) : pool.some((m) => codeFit(m) === 2))) return body(pool, context);
     }
     if (full.length) return body(full, context);
     if (fitting.length && !reduced) reduced = body(fitting, context);
@@ -331,9 +343,9 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // by a small context just as surely as by a small token budget. The pass
     // that finishes a reply prefers a bigger model when one is reachable.
     const ranked = code || purpose === 'final' ? orderForQuality(pool) : pool;
-    const ordered = code
-      ? [...ranked].sort((a, b) => (codeFit(b) - codeFit(a)) || 0)
-      : ranked;
+    const ordered = familyMode
+      ? [...ranked].sort((a, b) => (communityModelTier(b.id) - communityModelTier(a.id)) || (sizeOf(b.id) - sizeOf(a.id)))
+      : code ? [...ranked].sort((a, b) => (codeFit(b) - codeFit(a)) || 0) : ranked;
     // A pinned model leads its pass, but never a triage vote and never a pass
     // that is meant to be written by a different model than the draft.
     const pin = purpose !== 'triage' && pinned && !avoid.includes(pinned)
@@ -342,7 +354,7 @@ export function planCommunityRequest(models, { messages, purpose, preferOtherTha
     // The API may pick ANY supplied model; merely sorting a mixed list does not
     // select the better family. Constrain the list to the best available tier.
     // An explicit pin still wins, and other passes can choose a different model.
-    const bestTier = code && !pin ? codeFit(lineup[0]) : 0;
+    const bestTier = code && !pin && !familyMode ? codeFit(lineup[0]) : 0;
     const candidates = (bestTier ? lineup.filter((m) => codeFit(m) === bestTier) : lineup).slice(0, maxCandidates);
     return {
       models: candidates.map(({ id }) => id), messages: context, stream: true,
@@ -371,8 +383,8 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
           rosterAt = Date.now();
         }
         onModels(roster);
-        if (!roster.length) throw new CommunityError('No eligible GPT-OSS models are online on the community network right now. Try again later.');
-        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned, excluded, maxCandidates: 1 });
+        if (!roster.length) throw new CommunityError('No supported community models are online right now. Try again later or check availability in Settings.');
+        return planCommunityRequest(roster, { messages, purpose, preferOtherThan, code, pinned: preference.pinned, banned: preference.banned, excluded, maxCandidates: 1, familyMode: true });
       };
       const complete = async (body) => {
         onPhase('waiting');
@@ -388,31 +400,28 @@ export function communityEngine({ onPhase = () => {}, onModels = () => {}, onLim
         }
       };
       try {
-        const first = await plan();
-        try { return await complete(first); }
-        catch (error) {
-          if (error.fallback) {
-            try { return await complete(await plan({ excluded: first.models })); }
-            catch (fallbackError) {
-              if (fallbackError.message === 'No other compatible model is online right now. Try again later.') throw error;
-              throw fallbackError;
-            }
+        const excluded = [];
+        let lastError;
+        let refresh = false;
+        // Only rotate on explicit pre-queue refusals. Avoid duplicating jobs
+        // after a timeout, disconnect, cooldown or partially streamed answer.
+        for (let attempt = 0; attempt < 4; attempt++) {
+          let body;
+          try { body = await plan({ fresh: refresh, excluded }); }
+          catch (error) {
+            if (lastError && error.message === 'No other compatible model is online right now. Try again later.') throw lastError;
+            throw error;
           }
-          if (!error.refresh) throw error;
-          // The roster changed under us: look again rather than reusing it.
-          const next = await plan({ fresh: true });
-          if (next.models.length === first.models.length && next.models.every((id) => first.models.includes(id))) {
-            // The roster can lag an explicit pre-queue unknown-model refusal.
-            // Try another allowed model once. Never do this
-            // on timeouts, disconnects, rate limits, or an ambiguous stream.
-            try { return await complete(await plan({ excluded: first.models })); }
-            catch (fallbackError) {
-              if (fallbackError.message === 'No other compatible model is online right now. Try again later.') throw error;
-              throw fallbackError;
-            }
+          refresh = false;
+          try { return await complete(body); }
+          catch (error) {
+            if (!error.fallback && !error.refresh) throw error;
+            lastError = error;
+            excluded.push(...body.models);
+            refresh = error.refresh;
           }
-          return await complete(next);
         }
+        throw lastError;
       } catch (error) {
         if (error.retryAfter) onLimit(error.retryAfter);
         throw error;

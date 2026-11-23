@@ -27,6 +27,13 @@ export function playRequest(text) {
   if (!PLAY.test(value)) return undefined;
   const id = youtubeId(value);
   if (id) return { id };
+  if (/^(?:please\s+)?(?:play|watch|put on|start)\s+(?:me\s+)?(?:another(?:\s+(?:one|video|song|short))?|the next(?:\s+(?:one|video|song|short))?|next(?:\s+(?:one|video|song|short))?)[.!?\s]*$/i.test(value)) return { another: true };
+  if (/\bshorts\b/i.test(value)) {
+    const topic = value.replace(PLAY, '').replace(/\b(?:on|in|from)\s+youtube\b/gi, '').replace(/\bshorts\b/gi, ' ')
+      .replace(/^\s*(?:(?:me|us)\s+)?(?:(?:some|a few|the)\s+)?(?:about\s+|of\s+)?/i, '')
+      .replace(/^[\s:,-]+|[\s.!?,-]+$/g, '').replace(/\s+/g, ' ').trim();
+    return { query: topic ? `${topic.slice(0, 193)} shorts` : 'short videos', shorts: true };
+  }
   const rest = value
     .replace(PLAY, '')
     .replace(/\b(?:on|in|from)\s+youtube\b/gi, '')
@@ -36,7 +43,20 @@ export function playRequest(text) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!rest) return undefined;
-  return { query: tidy(rest) };
+  return { query: tidy(rest).slice(0, 200) };
+}
+
+/** Resolve a follow-up against this chat's earlier video cards, never another chat. */
+export function resolveAnother(videos) {
+  const previous = [...(videos ?? [])].reverse().find((video) => video && (video.id || video.query || video.items?.length));
+  if (!previous) return undefined;
+  const query = previous.query || previous.title || previous.items?.[0]?.title;
+  if (!query) return undefined;
+  return { query: query.slice(0, 200), ...(previous.shorts ? { shorts: true } : {}), another: true };
+}
+
+export function videoIds(videos) {
+  return [...new Set((videos ?? []).flatMap((video) => [video?.id, ...(video?.items ?? []).map((item) => item.id)]).filter((id) => VIDEO_ID.test(String(id ?? ''))))].slice(-60);
 }
 
 // People wrap a title in filler: "a jettism video" is really a search for
@@ -86,74 +106,80 @@ const VIDEO_ID = /^[\w-]{11}$/;
 // Whichever instance answered last is tried first next time.
 let preferred;
 
+// A list is needed for "another" and for a scrollable feed. Public search
+// front-ends do not prove that a video is a YouTube Short or portrait-shaped;
+// only known, positive durations up to a minute count as short-form here.
 function fromInvidious(data) {
-  if (!Array.isArray(data)) return undefined;
-  for (const item of data) {
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((item) => {
     const id = item?.videoId;
-    if (typeof id !== 'string' || !VIDEO_ID.test(id)) continue;
+    if (typeof id !== 'string' || !VIDEO_ID.test(id) || item.type && item.type !== 'video') return [];
     const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
-    return { id, ...(title ? { title } : {}) };
-  }
-  return undefined;
+    return [{ id, ...(title ? { title } : {}), duration: item.lengthSeconds }];
+  });
 }
 
 function fromPiped(data) {
-  const items = data?.items;
-  if (!Array.isArray(items)) return undefined;
-  for (const item of items) {
+  if (!Array.isArray(data?.items)) return [];
+  return data.items.flatMap((item) => {
     const id = /(?:v=|\/)([\w-]{11})(?:[&?]|$)/.exec(String(item?.url ?? ''))?.[1];
-    if (!id || !VIDEO_ID.test(id)) continue;
+    if (!id || !VIDEO_ID.test(id) || item.type && item.type !== 'stream') return [];
     const title = typeof item.title === 'string' ? item.title.slice(0, 200) : undefined;
-    return { id, ...(title ? { title } : {}) };
-  }
-  return undefined;
+    return [{ id, ...(title ? { title } : {}), duration: item.duration }];
+  });
 }
 
-async function ask(instance, query, fetchImpl, signal) {
+async function ask(instance, query, fetchImpl, signal, { shorts, exclude, limit }) {
   const response = await fetchImpl(instance.url + encodeURIComponent(query), {
     signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
   });
-  if (!response.ok) return undefined;
+  if (!response.ok) return [];
   const data = await response.json();
-  return instance.kind === 'piped' ? fromPiped(data) : fromInvidious(data);
+  const items = instance.kind === 'piped' ? fromPiped(data) : fromInvidious(data);
+  const seen = new Set(exclude);
+  return items.filter((item) => {
+    if (seen.has(item.id) || (shorts && (!Number.isFinite(item.duration) || item.duration <= 0 || item.duration > 60))) return false;
+    seen.add(item.id);
+    return true;
+  }).slice(0, limit).map(({ id, title }) => ({ id, ...(title ? { title } : {}) }));
 }
 
-/**
- * Finds the first video for a description using public front-ends, so no API
- * key is needed. Every instance is asked at once and the quickest usable answer
- * wins. Returns undefined only when none of them answer, and the page then
- * offers a plain YouTube search instead.
- */
-export async function searchVideo(query, { fetchImpl = globalThis.fetch, signal, instances = INSTANCES, timeout = SEARCH_TIMEOUT } = {}) {
+/** Returns a bounded batch from the first search instance with usable results. */
+export async function searchVideos(query, { fetchImpl = globalThis.fetch, signal, instances = INSTANCES, timeout = SEARCH_TIMEOUT, shorts = false, exclude = [], limit = 12 } = {}) {
   const clean = String(query ?? '').trim();
-  if (!clean || !instances.length || signal?.aborted) return undefined;
-  const ordered = preferred
-    ? [...instances].sort((a, b) => Number(b.url === preferred) - Number(a.url === preferred))
-    : instances;
+  if (!clean || !instances.length || signal?.aborted) return [];
+  const ordered = preferred ? [...instances].sort((a, b) => Number(b.url === preferred) - Number(a.url === preferred)) : instances;
   const controller = new AbortController();
-  const stop = () => controller.abort();
-  signal?.addEventListener('abort', stop, { once: true });
-  const timer = setTimeout(stop, timeout);
+  const max = Math.max(1, Math.min(12, Number.isFinite(limit) ? Math.floor(limit) : 12));
+  let timer;
+  let stop;
   try {
     return await new Promise((resolve) => {
-      let open = ordered.length;
+      let open = ordered.length, settled = false;
+      const finish = (items) => {
+        if (settled) return;
+        settled = true;
+        controller.abort();
+        resolve(items);
+      };
+      stop = () => finish([]);
+      signal?.addEventListener('abort', stop, { once: true });
+      timer = setTimeout(stop, timeout);
+      if (signal?.aborted) { stop(); return; }
       for (const instance of ordered) {
-        ask(instance, clean, fetchImpl, controller.signal)
-          .then((found) => {
-            if (!found) return;
-            preferred = instance.url;
-            resolve(found);
-          })
-          .catch(() => { /* a failed instance is simply skipped */ })
-          .finally(() => {
-            open -= 1;
-            if (open === 0) resolve(undefined);
-          });
+        ask(instance, clean, fetchImpl, controller.signal, { shorts, exclude, limit: max })
+          .then((found) => { if (found.length && !settled) { preferred = instance.url; finish(found); } })
+          .catch(() => {})
+          .finally(() => { if (--open === 0) finish([]); });
       }
     });
   } finally {
     clearTimeout(timer);
     controller.abort();
-    signal?.removeEventListener('abort', stop);
+    if (stop) signal?.removeEventListener('abort', stop);
   }
+}
+
+export async function searchVideo(query, options = {}) {
+  return (await searchVideos(query, { ...options, limit: 1 }))[0];
 }

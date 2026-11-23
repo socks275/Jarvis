@@ -75,3 +75,54 @@ test('falls through broken instances and piped responses', async () => {
   assert.equal(await searchVideo('jazz', { instances, fetchImpl: async () => Response.json({ nope: true }) }), undefined);
   assert.equal(await searchVideo('   ', { instances: [] }), undefined);
 });
+
+test('recognises another and short-video requests without mistaking specific titles for next', async () => {
+  assert.deepEqual(playRequest('play another'), { another: true });
+  assert.deepEqual(playRequest('please play another one'), { another: true });
+  assert.deepEqual(playRequest('play the next video'), { another: true });
+  assert.deepEqual(playRequest('play another song by Adele'), { query: 'another song by Adele' });
+  assert.deepEqual(playRequest('play some shorts'), { query: 'short videos', shorts: true });
+  assert.deepEqual(playRequest('play some shorts about cats'), { query: 'cats shorts', shorts: true });
+  assert.deepEqual(playRequest('play funny cat shorts on youtube'), { query: 'funny cat shorts', shorts: true });
+  const { resolveAnother, videoIds } = await import('../web/youtube.mjs');
+  assert.equal(resolveAnother([]), undefined);
+  assert.equal(resolveAnother([{ id: 'dQw4w9WgXcQ' }]), undefined);
+  assert.deepEqual(resolveAnother([{ query: 'jazz', id: 'dQw4w9WgXcQ' }]), { query: 'jazz', another: true });
+  assert.deepEqual(resolveAnother([{ query: 'cat shorts', shorts: true, items: [{ id: 'aaaaaaaaaaa' }] }]), { query: 'cat shorts', shorts: true, another: true });
+  assert.deepEqual(videoIds([{ id: 'dQw4w9WgXcQ' }, { items: [{ id: 'aaaaaaaaaaa' }, { id: 'dQw4w9WgXcQ' }] }]), ['dQw4w9WgXcQ', 'aaaaaaaaaaa']);
+});
+
+test('another result skips previously shown ids and short search only includes known short durations', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const instances = [{ kind: 'invidious', url: 'https://a.test/?q=' }];
+  const options = { instances, fetchImpl: async () => Response.json([
+    { type: 'video', videoId: 'aaaaaaaaaaa', title: 'old', lengthSeconds: 20 },
+    { type: 'video', videoId: 'bbbbbbbbbbb', title: 'new', lengthSeconds: 59 },
+    { type: 'video', videoId: 'bbbbbbbbbbb', title: 'duplicate', lengthSeconds: 59 },
+    { type: 'video', videoId: 'ccccccccccc', title: 'long', lengthSeconds: 200 },
+    { type: 'video', videoId: 'ddddddddddd', title: 'unknown' },
+    { type: 'channel', videoId: 'eeeeeeeeeee', title: 'channel', lengthSeconds: 5 },
+  ]) };
+  assert.deepEqual(await searchVideos('cats', { ...options, exclude: ['aaaaaaaaaaa'], limit: 1 }), [{ id: 'bbbbbbbbbbb', title: 'new' }]);
+  assert.deepEqual(await searchVideos('cats', { ...options, shorts: true, exclude: ['aaaaaaaaaaa'] }), [{ id: 'bbbbbbbbbbb', title: 'new' }]);
+});
+
+test('shorts search understands Piped durations and ignores unknown, live or long videos', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const results = await searchVideos('cats shorts', { shorts: true, instances: [{ kind: 'piped', url: 'https://a.test/?q=' }], fetchImpl: async () => Response.json({ items: [
+    { type: 'stream', url: '/watch?v=aaaaaaaaaaa', duration: 22, title: 'short' },
+    { type: 'stream', url: '/watch?v=bbbbbbbbbbb', duration: -1, title: 'live' },
+    { type: 'stream', url: '/watch?v=ccccccccccc', duration: 120, title: 'long' },
+  ] }) });
+  assert.deepEqual(results, [{ id: 'aaaaaaaaaaa', title: 'short' }]);
+});
+
+test('search stops at timeout and abort even if a front-end ignores cancellation', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const options = { instances: [{ kind: 'invidious', url: 'https://stuck.test/?q=' }], fetchImpl: () => new Promise(() => {}), timeout: 20 };
+  assert.deepEqual(await searchVideos('cats', options), []);
+  const controller = new AbortController();
+  const result = searchVideos('cats', { ...options, signal: controller.signal, timeout: 2000 });
+  controller.abort();
+  assert.deepEqual(await result, []);
+});
