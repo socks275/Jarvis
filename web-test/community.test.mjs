@@ -510,3 +510,15 @@ test('a severely congested preferred family does not block a much less busy fall
   models[0].queue = 2;
   assert.deepEqual(planCommunityRequest(models, { messages, purpose: 'draft', familyMode: true, maxCandidates: 1 }).models, ['openai/gpt-oss-120b']);
 });
+
+test('a fast 256-token model can start a draft when roomier models are heavily queued', () => {
+  const models = [
+    { id: 'koboldcpp/Qwen/Qwen3.8-27B', count: 1, queue: 3584, context: 8192, tokens: 1024 },
+    { id: 'koboldcpp/Qwen3-14B', count: 1, queue: 0, context: 8192, tokens: 256 },
+  ];
+  const result = planCommunityRequest(models, { messages, purpose: 'draft', familyMode: true, maxCandidates: 1 });
+  assert.deepEqual(result.models, ['koboldcpp/Qwen3-14B']);
+  assert.equal(result.max_tokens, 256);
+  const pin = planCommunityRequest(models, { messages, purpose: 'draft', familyMode: true, maxCandidates: 1, pinned: models[0].id });
+  assert.deepEqual(pin.models, [models[0].id]);
+});

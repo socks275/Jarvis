@@ -154,7 +154,13 @@ export async function searchVideos(query, { fetchImpl = globalThis.fetch, signal
   let stop;
   try {
     return await new Promise((resolve) => {
-      let open = ordered.length, settled = false;
+      // Search both the requested phrase and a short-duration phrase. Search
+      // engines often return long tutorials about Shorts for the word "shorts".
+      const shortTopic = clean.replace(/\bshorts\b/ig, '').trim() || 'funny';
+      const searches = ordered.flatMap((instance) => shorts
+        ? [{ instance, query: clean }, { instance, query: `${shortTopic} 30 seconds` }]
+        : [{ instance, query: clean }]);
+      let open = searches.length, settled = false;
       const collected = new Map();
       const finish = (items) => {
         if (settled) return;
@@ -166,8 +172,8 @@ export async function searchVideos(query, { fetchImpl = globalThis.fetch, signal
       signal?.addEventListener('abort', stop, { once: true });
       timer = setTimeout(() => finish([...collected.values()].slice(0, max)), timeout);
       if (signal?.aborted) { stop(); return; }
-      for (const instance of ordered) {
-        ask(instance, clean, fetchImpl, controller.signal, { shorts, exclude, limit: max })
+      for (const { instance, query: searchQuery } of searches) {
+        ask(instance, searchQuery, fetchImpl, controller.signal, { shorts, exclude, limit: max })
           .then((found) => {
             if (!found.length || settled) return;
             preferred = instance.url;
