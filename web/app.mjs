@@ -655,7 +655,7 @@ function videoCard(video, { pending = false, onRetry, onPlay = () => {}, auto = 
     if (pending) {
       meta.append(link, el('small', 'video-hint', 'Looking for the video…'));
     } else {
-      meta.append(link, el('small', 'video-hint', video.another ? 'No different result was found. Try another search or open YouTube.' : video.shorts ? 'No short videos were found. Try another search or open YouTube.' : 'The video search is unavailable right now, so this opens YouTube instead.'));
+      meta.append(link, el('small', 'video-hint', video.another ? 'No different result was found. Try another search or open YouTube.' : video.shorts ? 'No short videos could be loaded from the search services. Try again or search on YouTube.' : 'The video search is unavailable right now, so this opens YouTube instead.'));
       if (onRetry) {
         const retry = el('button', 'video-retry', 'Try again');
         retry.type = 'button';
@@ -671,7 +671,7 @@ function videoCard(video, { pending = false, onRetry, onPlay = () => {}, auto = 
 function shortFeed(video) {
   const wrapper = el('section', 'shorts-wrapper');
   wrapper.setAttribute('aria-label', 'Short video results');
-  wrapper.append(el('p', 'shorts-hint', 'Scroll or use Next for more short videos. Tap a video to play; playback stops when it scrolls out of view. Results are short videos, not verified YouTube Shorts.'));
+  wrapper.append(el('p', 'shorts-hint', 'Scroll or use Next for more short videos. Tap a video to play; playback stops when it scrolls out of view. Results may include short videos that are not YouTube Shorts. Some videos cannot be embedded; use Open on YouTube if playback fails.'));
   const feed = el('div', 'shorts-feed');
   feed.tabIndex = 0;
   feed.setAttribute('role', 'region');
@@ -1317,7 +1317,6 @@ async function generate(chat, message) {
     if (controller.signal.aborted) throw controller.signal.reason;
     const answer = await answerChat({ messages: conversationContext(chat, message.engine), generate: runtime.generate,
       signal: controller.signal, deep: message.deep, direct: message.raw === true,
-      decide: true,
       onText(text) {
         // The draft stays on screen while the final pass writes, so the answer
         // never collapses to an empty bubble and then grows back.

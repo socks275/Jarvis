@@ -81,7 +81,7 @@ test('recognises another and short-video requests without mistaking specific tit
   assert.deepEqual(playRequest('please play another one'), { another: true });
   assert.deepEqual(playRequest('play the next video'), { another: true });
   assert.deepEqual(playRequest('play another song by Adele'), { query: 'another song by Adele' });
-  assert.deepEqual(playRequest('play some shorts'), { query: 'short videos', shorts: true });
+  assert.deepEqual(playRequest('play some shorts'), { query: 'shorts', shorts: true });
   assert.deepEqual(playRequest('play some shorts about cats'), { query: 'cats shorts', shorts: true });
   assert.deepEqual(playRequest('play funny cat shorts on youtube'), { query: 'funny cat shorts', shorts: true });
   const { resolveAnother, videoIds } = await import('../web/youtube.mjs');
@@ -125,4 +125,24 @@ test('search stops at timeout and abort even if a front-end ignores cancellation
   const result = searchVideos('cats', { ...options, signal: controller.signal, timeout: 2000 });
   controller.abort();
   assert.deepEqual(await result, []);
+});
+
+test('explicit shorts with missing duration are accepted but live and unmarked unknown videos are not', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const results = await searchVideos('shorts', { shorts: true, instances: [{ kind: 'piped', url: 'https://a.test/?q=' }], fetchImpl: async () => Response.json({ items: [
+    { type: 'stream', url: '/shorts/aaaaaaaaaaa', title: 'Short' },
+    { type: 'short', url: '/shorts/bbbbbbbbbbb', title: 'Another' },
+    { type: 'stream', url: '/watch?v=ccccccccccc', title: 'Unknown' },
+    { type: 'stream', url: '/shorts/ddddddddddd', isLive: true, title: 'Live' },
+  ] }) });
+  assert.deepEqual(results, [{ id: 'aaaaaaaaaaa', title: 'Short' }, { id: 'bbbbbbbbbbb', title: 'Another' }]);
+});
+
+test('short feed combines and deduplicates results from responsive front-ends', async () => {
+  const { searchVideos } = await import('../web/youtube.mjs');
+  const instances = [{ kind: 'invidious', url: 'https://a.test/?q=' }, { kind: 'invidious', url: 'https://b.test/?q=' }];
+  const results = await searchVideos('shorts', { shorts: true, instances, fetchImpl: async (url) => Response.json(url.includes('a.test')
+    ? [{ type: 'video', videoId: 'aaaaaaaaaaa', lengthSeconds: 12 }]
+    : [{ type: 'video', videoId: 'aaaaaaaaaaa', lengthSeconds: 12 }, { type: 'video', videoId: 'bbbbbbbbbbb', lengthSeconds: 30 }]) });
+  assert.deepEqual(results.map(item => item.id), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
 });

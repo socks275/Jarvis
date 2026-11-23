@@ -859,3 +859,15 @@ test('invalid saved short-video feed is not accepted as a valid chat', () => {
   storage.setItem(HISTORY_KEY, JSON.stringify([chat]));
   assert.deepEqual(readChats(storage), []);
 });
+
+test('local team selection starts the answer without a queued triage call', async () => {
+  for (const [content, expected] of [['hello', ['answer']], ['Explain gravity', ['draft', 'final']], ['write code', ['draft', 'review', 'final']]]) {
+    const calls = [];
+    await answerChat({ messages: [{ role: 'user', content }], signal: signal(), generate: async ({ purpose }) => {
+      calls.push(purpose);
+      return { text: content === 'write code' ? '```js\nconsole.log(1);\n```' : 'A useful answer.', model: purpose };
+    } });
+    assert.deepEqual(calls, expected);
+  }
+  assert.equal(planAnswer('hi, I need advice about my health').mode, 'pair');
+});
